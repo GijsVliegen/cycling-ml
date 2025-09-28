@@ -10,100 +10,48 @@ import sympy as sp
 
 
 class Spline():
-    def __init__(spline_init_func, n_splines):
-        pass
 
-class SplinesSGD:
-    
-    lr = 1e-2
-    nr_riders_per_race = 5
-
-    def __init__(self, X):
-        # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
-        # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
-        # 10-11: age | rank_bucket  
-        self.feature_idxs = [8, 9, 10]
-        self.feature_names = ["rank", "startlist_score", "rank_bucket"]
-        self.n_splines = 20
-        self.gams = [
-            LinearGAM(s(0, n_splines=self.n_splines)).fit(X[:,[idx]], X[:, [5]])
-            for idx in self.feature_idxs
-        ]
-        self.init_feature_funcs = self._init_feature_funcs(X)
-        self.weights_init = self.init_splines(X)
+    lr = 1e-3
+    def __init__(
+        self,
+        spline_init_func: callable, 
+        n_splines: int, 
+        feature_idx: int, 
+        feature_name: str, 
+        all_data: np.array
+    ):  
+        self.feature_idx = feature_idx
+        self.feature_name = feature_name
+        self.gam = LinearGAM(s(0, n_splines=n_splines)).fit(all_data[:,[feature_idx]], all_data[:, [feature_idx]])
+        self.weights_init = self._init_spline(
+            data = all_data, 
+            init_func = spline_init_func
+        )
         self.weights = self.weights_init
-        self.Bs = self.init_Bs(X) #model matrices for splines
-        self.Ps = [
-            self._create_penalty_matrix(spline_basis.shape[1])
-            for spline_basis in self.Bs
-        ]  #smoothness penalty matrices for splines
-        self.lams = [0.6] * len(self.feature_idxs) 
+        self.basis = self.gam._modelmat(all_data[:,[feature_idx]])
 
+    def compute(self, indexes: list[int]) -> np.array:
+        return self.basis[indexes] @ self.weights
 
-    def _create_penalty_matrix(self, n_basis):
+    def _init_spline(self, data: np.array, init_func: callable):
         """
-        Create penalty matrix for smoothness (penalizes second derivatives).
-        This is the discrete approximation of the integral of squared second derivatives.
+        Initializes spline weights by fitting a least squares solution to the provided data and initialization function.
+
+        Args:
+            data (np.array): Input data array where features are accessed by self.feature_idx.
+            init_func (callable): Function to generate target values for initialization, applied to the feature grid.
+
+        Returns:
+            np.ndarray: Array of spline weights computed from the least squares fit.
         """
-        # Create second difference matrix
-        D = np.diff(np.eye(n_basis), n=2, axis=0)
-        # Penalty matrix is D.T @ D
-        P = D.T @ D
-        return P
+        x_grid = np.linspace(data[:,self.feature_idx].min(), data[:,self.feature_idx].max(), 100).reshape(-1,1)
+        B_grid = self.gam._modelmat(x_grid)
+        y_target = init_func(x_grid.ravel())
+        weights, *_ = np.linalg.lstsq(B_grid.toarray(), y_target, rcond=None)
+        return weights
     
-    def init_Bs(self, X):
-        return [
-            self.gams[idx]._modelmat(X[:,[feature_idx]])
-            for idx, feature_idx in enumerate(self.feature_idxs)
-        ]   
-    
-    def _init_feature_funcs(self, X):
-        #init splines to some base functions
-        rank_max = 25
-        def rank_spline_init(x): #0-> 1,  40-> 0
-            """exponential decay"""
-            return 1/x
-            # weight = math.log(2) / rank_max
-            # clipped_x = np.clip(x, 1, rank_max-1) #avoid too steep decline
-            # return -np.exp(weight * clipped_x) + 2
-        
-        a = min(X[:,9])
-        b = np.mean(X[:,9])
-        c = max(X[:,9])
-
-        A = np.array([
-            [a**2, a, 1],
-            [b**2, b, 1],
-            [c**2, c, 1]
-        ])
-        y = np.array([0.5, 1, 2])
-        coeffs = np.linalg.solve(A, y)  # [alpha, beta, gamma]
-        def startlist_score_init(x): #min -> 0.25, max -> 2
-            """kwadratisch"""
-            return coeffs[0]*x**2 + coeffs[1]*x + coeffs[2]
-        
-        return { #dict, safer for debuggin
-            8: rank_spline_init,
-            9: startlist_score_init,
-        }
-
-    def init_splines(self, X):
-        
-        weights_init = []
-        for idx, feature_idx in enumerate(self.feature_idxs):
-            x_grid = np.linspace(X[:,feature_idx].min(), X[:,feature_idx].max(), 100).reshape(-1,1)
-            B_grid = self.gams[idx]._modelmat(x_grid)
-            y_target = self.init_feature_funcs[feature_idx](x_grid.ravel())
-            weights_init_new, *_ = np.linalg.lstsq(B_grid.toarray(), y_target, rcond=None)
-            weights_init.append(weights_init_new)
-
-        return weights_init
-
     def grad_descend_pass(self, neighbor_idxs, softmax_w, error):
-        lam2 = 10.0
-        lam3 = 10.0
-            
-
+        # lam2 = 10.0
         # smooth_penalties = [
         #     spline_weights.T @ penalty_matrix @ spline_weights
         #     for spline_weights, penalty_matrix in zip(self.weights, self.Ps) 
@@ -122,49 +70,119 @@ class SplinesSGD:
         # # Total gradient
         # total_grad = mse_grad + smooth_grad
 
+        weighted_basis_sum = softmax_w * self.basis[neighbor_idxs]
+        gradient_pass = error * weighted_basis_sum
+        self.weights -= self.lr * gradient_pass
 
-        grads = [
-            np.zeros_like(spline_weights)
-            for spline_weights in self.weights
+
+    # def _create_penalty_matrix(self, n_basis):
+    #     """
+    #     Create penalty matrix for smoothness (penalizes second derivatives).
+    #     This is the discrete approximation of the integral of squared second derivatives.
+    #     """
+    #     # Create second difference matrix
+    #     D = np.diff(np.eye(n_basis), n=2, axis=0)
+    #     # Penalty matrix is D.T @ D
+    #     P = D.T @ D
+    #     return P
+
+class SplinesSGD:
+    
+    nr_riders_per_race = 5
+
+    def __init__(self, X):
+        # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
+        # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
+        # 10-11: age | rank_bucket  
+
+        self.init_feature_funcs = self._init_feature_funcs(X)
+        self.feature_idxs = [8, 9, 11]
+        self.feature_names = ["rank", "startlist_score", "rank_bucket"]
+
+        self.splines: list[Spline] = [
+            Spline(
+                spline_init_func = self.init_feature_funcs[feature_idx], 
+                n_splines = 15, 
+                feature_idx = feature_idx, 
+                feature_name = feature_name,
+                all_data = X
+            ) for feature_idx, feature_name in zip(
+                self.feature_idxs,
+                self.feature_names
+            )
+        ] 
+    
+    def _init_feature_funcs(self, X):
+        #init splines to some base functions
+        rank_max = 40
+        def rank_spline_init(x): #0-> 1,  40-> 0
+            """exponential decay"""
+            weight = math.log(2) / rank_max
+            clipped_x = np.clip(x, 1, rank_max-1) #avoid too steep decline
+            return -np.exp(weight * clipped_x) + 2
+        
+        a = min(X[:,9])
+        b = np.mean(X[:,9])
+        c = max(X[:,9])
+        A = np.array([
+            [a**2, a, 1],
+            [b**2, b, 1],
+            [c**2, c, 1]
+        ])
+        y = np.array([0.5, 1, 2])
+        coeffs = np.linalg.solve(A, y)  # [alpha, beta, gamma]
+        def startlist_score_init(x): #min -> 0.25, max -> 2
+            """kwadratisch"""
+            return coeffs[0]*x**2 + coeffs[1]*x + coeffs[2]
+        
+        def rank_bucket_init(x):
+            return -x
+        
+        return { #dict, safer for debuggin
+            8: rank_spline_init,
+            9: startlist_score_init,
+            11: rank_bucket_init,
+        }
+
+    def grad_descend_pass(self, neighbor_idxs, softmax_w, error):
+        for spline in self.splines:
+            spline.grad_descend_pass(
+                neighbor_idxs = neighbor_idxs,
+                softmax_w = softmax_w,
+                error = error
+            )
+
+
+    def get_closest_points(self, X, y) -> list[int]:
+        """mock dist function: return all data points with the same id and distance class
+        
+        more entries noramlly for A than for B"""
+        return [
+            i
+            for i, data_point in enumerate(X)
+            if (
+                data_point[0] == y[0] and #same name
+                data_point[1] != y[1] and      #different race id
+                data_point[6] <= y[6]  #same or earlier year   
+            )
         ]
 
-        for i, grad in enumerate(grads):
-            for neighbor_idx, w in zip(neighbor_idxs, softmax_w):
-                grads[i] += error * w * self.Bs[i][neighbor_idx]
-
-        self.weights = [
-            w - self.lr * g.A[0] #.A = .toarray()
-            for w, g in zip(self.weights, grads)
-        ]
-            # gradient accumulation
-            # inside your loop, after computing grad_alpha etc.
-            # print("||grad_alpha||", np.linalg.norm(grad_alpha))
-            # print("||grad_beta||", np.linalg.norm(grad_beta))
-            # print("||grad_gamma||", np.linalg.norm(grad_gamma)
-
-    def compute_y(self, neighbor_idxs):
-
-        s_neighbors = []
-        for j in neighbor_idxs:
-            # s_feature_vals = [0]
-            # for B, w  in zip(self.Bs, self.weights):
-            #     # print(f"debugigng: B = {B[j]}, w = {w}")
-            #     s_feature_vals.append(
-            #         B[j] @ w
-            #     )
-            s_feature_vals = [
-                B[j] @ w
-                for B, w in zip(self.Bs, self.weights)
-            ]
-            neighbor_score = math.prod(s_feature_vals) #only feature for rank*h
-            s_neighbors.append(neighbor_score)
-
-        s_neighbors = np.array(s_neighbors)/len(neighbor_idxs)  #  shape (10,)
-
-        # log-sum-exp for stability 
-        y_pred = np.sum(s_neighbors)  # = sum(exp(s))
-
-        return y_pred, s_neighbors
+    def compute_y(self, 
+        all_data: np.array, 
+        x: np.array
+    ) -> tuple[float, np.array]:
+        neighbor_idxs = self.get_closest_points(
+            X = all_data, 
+            y = x
+        )
+        s_feature_vals: np.array = np.vstack([
+            spline.compute(indexes = neighbor_idxs)
+            for spline in self.splines
+        ])
+        neighbor_scores = np.prod(s_feature_vals, axis = 0) #only feature for rank*h
+        neighbor_scores = np.array(neighbor_scores)/len(neighbor_idxs)  #  shape (10,)
+        y_pred = np.sum(neighbor_scores)
+        return y_pred, neighbor_idxs, neighbor_scores
 
     possible_buckets = [
         [1, 3],
@@ -212,24 +230,28 @@ class SplinesSGD:
 
         return errors
 
-    def training_step(self, Y_true, neighbor_idxs_s, All):
+    def training_step(self, Y_true, indices, data):
 
         Y_pred = []
-        s_neighbors_s = []
-        for neighbor_idxs in neighbor_idxs_s:
+        neighbor_scores_s = []
+        neighbor_idxs_s = []
+        for index in indices:
 
         # compute log-terms for each neighbor
-            new_y_pred, new_s_neighbors = self.compute_y(neighbor_idxs)
+            new_y_pred, new_neighbor_idxs, new_neighbor_scores = self.compute_y(
+                all_data = data, 
+                x = data[index]
+            )
             Y_pred.append(new_y_pred)
-            s_neighbors_s.append(new_s_neighbors)
+            neighbor_scores_s.append(new_neighbor_scores)
+            neighbor_idxs_s.append(new_neighbor_idxs)
 
         errors = self.calculate_errors(Y_pred, Y_true)
         
-        for error, s_neighbors, neighbor_idxs in zip(errors, s_neighbors_s, neighbor_idxs_s):
-        # softmax weights for distributing gradient across neighbors
-            # softmax_w = np.exp(s_neighbors) / np.sum(np.exp(s_neighbors))
-            other_w = (1 / All[neighbor_idxs, 8]) / np.sum(1 / All[neighbor_idxs, 8])
-            self.grad_descend_pass(neighbor_idxs, other_w, error)
+        for error, neighbor_scores, neighbor_idxs in zip(errors, neighbor_scores_s, neighbor_idxs_s):
+            # softmax weights for distributing gradient across neighbors
+            softmax_w = np.exp(neighbor_scores) / np.sum(np.exp(neighbor_scores))
+            self.grad_descend_pass(neighbor_idxs, softmax_w, error)
         return errors
 
 
@@ -310,49 +332,42 @@ class SplinesSGD:
 def split_train_test(All: pl.DataFrame, test_ratio=0.2) -> tuple[np.ndarray, np.ndarray]:
     split_idx = int((1 - test_ratio) * All.height)
     return All[:split_idx].to_numpy(), All[split_idx:].to_numpy()
-    
-def predict(X, y, model):
-    idxs = get_closest_points(X, y)
-    y_pred = model.compute_y(X, idxs)
-    return y_pred
-
-def get_closest_points(X, y):
-    """mock dist function: return all data points with the same id and distance class
-    
-    more entries noramlly for A than for B"""
-    return [
-        i
-        for i, data_point in enumerate(X)
-        if (
-            data_point[0] == y[0] and #same name
-            data_point[1] != y[1] and      #different race id
-            data_point[6] <= y[6]  #same or earlier year   
-        )
-    ]
-
 
 def train_model(All, X, spline_model: SplinesSGD):
 
-    nr_riders_per_race = 5
+    nr_riders_per_race = 8
     epochs = 1000
     total_loss = 0
     for epoch in range(epochs):
         random_race_id = np.random.choice(X[:,1]) #take id out of X
-        random_race_idxs = np.where(All[:,1] == random_race_id)[0] #take idx out of All
+        random_top_race_idxs = np.where(
+            (All[:,1] == random_race_id) & (All[:, 8] <= 25)
+        )[0] #top 25 results
+        random_bottom_race_idxs = np.where(
+            (All[:,1] == random_race_id) & (All[:, 8] >= 25)
+        )[0] #bottom 25 results
 
-        n = min(nr_riders_per_race, len(random_race_idxs))
-        random_rider_idxs = np.random.choice(len(random_race_idxs), size=n, replace=False)
 
-        if len(random_rider_idxs) < 2:
+        n = min(nr_riders_per_race, len(random_top_race_idxs))
+        random_rider_idxs = np.concatenate((
+            np.random.choice(random_top_race_idxs, size=int(n/2), replace=False),
+            np.random.choice(random_bottom_race_idxs, size=int(n/2), replace=False)
+        ))
+
+        if n < 2:
             continue
 
-        neighbor_idxs_s = [
-            get_closest_points(All, All[rider_idxs])
-            for rider_idxs in random_rider_idxs
-        ]
+        # neighbor_idxs_s = [
+        #     get_closest_points(All, All[rider_idxs])
+        #     for rider_idxs in random_rider_idxs
+        # ]
 
         Y_true = All[random_rider_idxs, 8]
-        errors = spline_model.training_step(Y_true, neighbor_idxs_s, All)
+        errors = spline_model.training_step(
+            Y_true = Y_true, 
+            indices = random_rider_idxs, 
+            data = All
+        )
         total_loss += sum([abs(error) for error in errors])
 
         if epoch % (epochs/10) == 0:
