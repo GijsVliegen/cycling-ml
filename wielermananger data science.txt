@@ -1,0 +1,22 @@
+
+Similarity between races:
+
+	compare results of top 25 using RBO, averaged over multiple years -> similarity between 0 and 1 between every race.
+
+Time between results:
+    	Holt–Winters (Triple Exponential Smoothing):further incorporates seasonality components alongside level and trend smoothing.
+https://www.solarwinds.com/blog/holt-winters-forecasting-simplified
+
+Results of other races * similarity between races * time between results -> score for that race for that rider
+
+
+compare with competitor scores and teammates scores to make up a ranking:
+	- Teammates can help control the race, chase attacks, lead out, etc.
+	Approach:
+	    Compute average or weighted average score of team riders (excluding the target).
+	    Apply a team support factor, e.g.:
+	Option B: Relative Percentile
+    		Compute percentile of rider among competitors based on predicted scores.
+    		Normalize to a scale (e.g. 0–1) and use that as the final score.
+
+
