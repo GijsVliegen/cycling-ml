@@ -27,13 +27,13 @@ class Spline():
             data = all_data, 
             init_func = spline_init_func
         )
-        self.weights = self.weights_init
+        self.weights = self.weights_init.copy()
         self.basis = self.gam._modelmat(all_data[:,[feature_idx]])
 
     def compute(self, indexes: list[int]) -> np.array:
         return self.basis[indexes] @ self.weights
 
-    def _init_spline(self, data: np.array, init_func: callable):
+    def _init_spline(self, data: np.array, init_func: callable) -> np.array:
         """
         Initializes spline weights by fitting a least squares solution to the provided data and initialization function.
 
@@ -74,7 +74,22 @@ class Spline():
         gradient_pass = error * weighted_basis_sum
         self.weights -= self.lr * gradient_pass
 
+    def plot_learned_spline(self):
+        XX = self.gam.generate_X_grid(term=0)   # only 1D in gam_f2 and gam_f3
+        B = self.gam._modelmat(XX)              # spline basis on that grid
+        y_hat = B @ self.weights                 # spline curve
 
+        plt.figure()
+        plt.plot(XX[:, 0], y_hat, label="learned spline")
+
+        y_start = B @ self.weights_init
+        plt.plot(XX[:, 0], y_start, "r--", label=str(self.feature_idx))
+
+        plt.xlabel(f"f{self.feature_idx}: {self.feature_name}")
+        plt.ylabel("spline value")
+        plt.legend()
+        plt.show()
+        
     # def _create_penalty_matrix(self, n_basis):
     #     """
     #     Create penalty matrix for smoothness (penalizes second derivatives).
@@ -96,8 +111,20 @@ class SplinesSGD:
         # 10-11: age | rank_bucket  
 
         self.init_feature_funcs = self._init_feature_funcs(X)
-        self.feature_idxs = [8, 9, 11]
-        self.feature_names = ["rank", "startlist_score", "rank_bucket"]
+        self.feature_idxs = [9, 11]
+        self.feature_names = ["startlist_score", "rank_bucket"]
+        self.race_dist_idxs = [2, 3, 4, 5, 6]
+        self.race_dist_metrics = [
+            "distance_km",
+            "elevation",
+            "profile_score",
+            "profile_score_last_25k",
+            "classification"
+        ]
+        self.distance_weights = np.full(
+            len(self.race_dist_idxs),  #length
+            1/len(self.race_dist_idxs) #init weights
+        )
 
         self.splines: list[Spline] = [
             Spline(
@@ -152,7 +179,6 @@ class SplinesSGD:
                 error = error
             )
 
-
     def get_closest_points(self, X, y) -> list[int]:
         """mock dist function: return all data points with the same id and distance class
         
@@ -175,6 +201,11 @@ class SplinesSGD:
             X = all_data, 
             y = x
         )
+
+        neighbor_distances = #TODO: fill out
+
+        #TODO: keep only closest 25 neighbors
+
         s_feature_vals: np.array = np.vstack([
             spline.compute(indexes = neighbor_idxs)
             for spline in self.splines
@@ -230,14 +261,11 @@ class SplinesSGD:
 
         return errors
 
-    def training_step(self, Y_true, indices, data):
-
+    def predict_ranking_for_race(self, indices, data):
         Y_pred = []
         neighbor_scores_s = []
         neighbor_idxs_s = []
         for index in indices:
-
-        # compute log-terms for each neighbor
             new_y_pred, new_neighbor_idxs, new_neighbor_scores = self.compute_y(
                 all_data = data, 
                 x = data[index]
@@ -245,9 +273,17 @@ class SplinesSGD:
             Y_pred.append(new_y_pred)
             neighbor_scores_s.append(new_neighbor_scores)
             neighbor_idxs_s.append(new_neighbor_idxs)
+        return Y_pred, neighbor_idxs_s, neighbor_scores_s
 
+    def training_step(self, Y_true, indices, data):
+        Y_pred, neighbor_idxs_s, neighbor_scores_s = self.predict_ranking_for_race(
+            indices,
+            data
+        )
         errors = self.calculate_errors(Y_pred, Y_true)
         
+        #TODO: update weights of distance metric
+
         for error, neighbor_scores, neighbor_idxs in zip(errors, neighbor_scores_s, neighbor_idxs_s):
             # softmax weights for distributing gradient across neighbors
             softmax_w = np.exp(neighbor_scores) / np.sum(np.exp(neighbor_scores))
@@ -256,111 +292,37 @@ class SplinesSGD:
 
 
     def plot_learned_splines(self):
-        for gam, start_weights, weights, feature_idx in zip(self.gams, self.weights_init, self.weights, self.feature_idxs):
-
-        # Generate a grid of X values for the feature
-            XX = gam.generate_X_grid(term=0)   # only 1D in gam_f2 and gam_f3
-            B = gam._modelmat(XX)              # spline basis on that grid
-            y_hat = B @ weights                 # spline curve
-
-            plt.figure()
-            plt.plot(XX[:, 0], y_hat, label="learned spline")
-
-            y_start = B @ start_weights
-            plt.plot(XX[:, 0], y_start, "r--", label=str(feature_idx))
-
-            plt.xlabel(f"f{feature_idx}")
-            plt.ylabel("spline value")
-            plt.legend()
-            plt.show()
-    
-    def performance(self, All, Y):
-
-        test_size = 50
-        race_ids = np.unique(Y[:, 1])
-        test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
-
-        Y_true_buckets = []
-        Y_pred_buckets = []
-        for test_race in test_race_ids:
-            random_race_idxs = np.where(All[:,1] == test_race)[0]
-
-            n = min(self.nr_riders_per_race, len(random_race_idxs))
-            random_rider_idxs = np.random.choice(random_race_idxs, size=n, replace=False)
-
-            if len(random_rider_idxs) < 2:
-                continue
-
-            neighbor_idxs_s = [
-                get_closest_points(All, All[rider_idx])
-                for rider_idx in random_rider_idxs
-            ]
-            race_pred = []
-            for neighbor_idxs in neighbor_idxs_s:
-
-            # compute log-terms for each neighbor
-                new_y_pred, _ = self.compute_y(neighbor_idxs)
-                race_pred.append(new_y_pred)
-
-            y_true_ranks = All[random_rider_idxs, 8]
-            y_true_order = np.argsort(np.argsort(y_true_ranks)) 
-            y_true_buckets = self.ranks_to_buckets(y_true_ranks)
-            Y_true_buckets.extend(y_true_buckets)
-            y_pred_order = np.argsort(np.argsort( -1 * np.array(race_pred))) #higher score -> early in order
-            y_pred_ranks = [
-                y_true_ranks[np.where(y_true_order == order_to_find)[0]][0]
-                for order_to_find in y_pred_order
-            ]
-            y_pred_buckets = self.ranks_to_buckets(y_pred_ranks)
-            Y_pred_buckets.extend(y_pred_buckets)
-
-
-        mse = mean_squared_error(Y_true_buckets, Y_pred_buckets)
-        mae = mean_absolute_error(Y_true_buckets, Y_pred_buckets)
-        r2  = r2_score(Y_true_buckets, Y_pred_buckets)
-
-
-        self.plot_learned_splines()
-        return {
-            "MSE": mse,
-            "MAE": mae,
-            "R2": r2
-        }
-
-
+        for spline in self.splines:
+            spline.plot_learned_spline()
+            
 
 def split_train_test(All: pl.DataFrame, test_ratio=0.2) -> tuple[np.ndarray, np.ndarray]:
     split_idx = int((1 - test_ratio) * All.height)
     return All[:split_idx].to_numpy(), All[split_idx:].to_numpy()
 
-def train_model(All, X, spline_model: SplinesSGD):
+def get_random_riders(All, race_id, min_nr = 6):
+    top_rider_idxs = np.where(
+        (All[:,1] == race_id) & (All[:, 8] <= 25)
+    )[0] #top 25 results
+    bottom_rider_idxs = np.where(
+        (All[:,1] == race_id) & (All[:, 8] >= 25)
+    )[0] #bottom results
+    n = min(min_nr , len(bottom_rider_idxs))
+    return np.concatenate((
+        np.random.choice(top_rider_idxs, size=int(n/2), replace=False),
+        np.random.choice(bottom_rider_idxs, size=int(n/2), replace=False)
+    ))
 
-    nr_riders_per_race = 8
+def train_model(All, X, spline_model: SplinesSGD):
+    nr_riders_per_race = 6
     epochs = 1000
     total_loss = 0
     for epoch in range(epochs):
         random_race_id = np.random.choice(X[:,1]) #take id out of X
-        random_top_race_idxs = np.where(
-            (All[:,1] == random_race_id) & (All[:, 8] <= 25)
-        )[0] #top 25 results
-        random_bottom_race_idxs = np.where(
-            (All[:,1] == random_race_id) & (All[:, 8] >= 25)
-        )[0] #bottom 25 results
+        random_rider_idxs = get_random_riders(All, random_race_id, nr_riders_per_race)
 
-
-        n = min(nr_riders_per_race, len(random_top_race_idxs))
-        random_rider_idxs = np.concatenate((
-            np.random.choice(random_top_race_idxs, size=int(n/2), replace=False),
-            np.random.choice(random_bottom_race_idxs, size=int(n/2), replace=False)
-        ))
-
-        if n < 2:
+        if len(random_rider_idxs) < nr_riders_per_race:
             continue
-
-        # neighbor_idxs_s = [
-        #     get_closest_points(All, All[rider_idxs])
-        #     for rider_idxs in random_rider_idxs
-        # ]
 
         Y_true = All[random_rider_idxs, 8]
         errors = spline_model.training_step(
@@ -376,7 +338,54 @@ def train_model(All, X, spline_model: SplinesSGD):
 
 
 def compute_model_performance(All, Y, model: SplinesSGD):
-    return model.performance(All, Y)
+    test_size = 50
+    race_ids = np.unique(Y[:, 1])
+    test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
+
+    Y_true_buckets = []
+    Y_pred_buckets = []
+    
+    nr_riders_per_race = 10
+
+    for test_race in test_race_ids:
+        random_rider_idxs = get_random_riders(All, test_race, nr_riders_per_race)
+
+        if len(random_rider_idxs) < nr_riders_per_race:
+            continue
+
+        race_pred = []
+
+        y_pred, neighbor_idxs_s, neighbor_scores_s = model.predict_ranking_for_race(
+            random_rider_idxs,
+            All
+        )
+
+        y_true_ranks = All[random_rider_idxs, 8]
+        y_true_order = np.argsort(np.argsort(y_true_ranks)) 
+        y_true_buckets = model.ranks_to_buckets(y_true_ranks)
+        Y_true_buckets.extend(y_true_buckets)
+
+        y_pred_order = np.argsort(np.argsort( -1 * np.array(y_pred))) #higher score -> early in order
+        y_pred_ranks = [
+            y_true_ranks[np.where(y_true_order == order_to_find)[0]][0]
+            for order_to_find in y_pred_order
+        ]
+        y_pred_buckets = model.ranks_to_buckets(y_pred_ranks)
+        Y_pred_buckets.extend(y_pred_buckets)
+
+
+    mse = mean_squared_error(Y_true_buckets, Y_pred_buckets)
+    mae = mean_absolute_error(Y_true_buckets, Y_pred_buckets)
+    r2  = r2_score(Y_true_buckets, Y_pred_buckets)
+
+
+    model.plot_learned_splines()
+    return {
+        "MSE": mse,
+        "MAE": mae,
+        "R2": r2
+    }
+
 
 def main():
     race_result_features = pl.read_parquet("data/features_df.parquet")
