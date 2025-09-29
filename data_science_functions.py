@@ -13,7 +13,7 @@ condition_similarity_cols = [
     # "temp", # TODO: not always present 
     # "classification", #TODO (also convert to numeric value)
     "distance_km", 
-    # "elevation_m", 
+    "elevation_m", 
     # "avg_speed_kmh", 
     "startlist_score",
     "profile_score",
@@ -455,12 +455,14 @@ def main():
 
     races_df = pl.read_parquet("data/races_df.parquet")
     filled_out_races_df = fillout_races_without_profile_scores(races_df=races_df, results_similarity=results_similarity)
+    
+    normalized_races_df = normalize_race_data(races_df=filled_out_races_df)
     print(filled_out_races_df)
 
     # normalized_races_df = normalize_race_data(races_df=races_df)
     # normalized_races_df.write_parquet("data/normalized_races_df.parquet")
 
-    features_df = create_feature_table(results=results_df, races=filled_out_races_df)
+    features_df = create_feature_table(results=results_df, races=normalized_races_df)
     print(features_df)
     features_df.write_parquet("data/features_df.parquet")
 

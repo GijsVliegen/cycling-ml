@@ -113,18 +113,19 @@ class SplinesSGD:
         self.init_feature_funcs = self._init_feature_funcs(X)
         self.feature_idxs = [9, 11]
         self.feature_names = ["startlist_score", "rank_bucket"]
-        self.race_dist_idxs = [2, 3, 4, 5, 6]
+        self.race_dist_idxs = [2, 3, 4, 5]#, 6]
         self.race_dist_metrics = [
             "distance_km",
             "elevation",
             "profile_score",
             "profile_score_last_25k",
-            "classification"
+            # "classification"
         ]
         self.distance_weights = np.full(
             len(self.race_dist_idxs),  #length
             1/len(self.race_dist_idxs) #init weights
         )
+        self.lr_distance = 1e-4
 
         self.splines: list[Spline] = [
             Spline(
@@ -171,13 +172,21 @@ class SplinesSGD:
             11: rank_bucket_init,
         }
 
-    def grad_descend_pass(self, neighbor_idxs, softmax_w, error):
+    def grad_descend_pass(self, neighbor_idxs, softmax_w, error, x=None, data=None, neighbor_distances=None):
         for spline in self.splines:
             spline.grad_descend_pass(
                 neighbor_idxs = neighbor_idxs,
                 softmax_w = softmax_w,
                 error = error
             )
+
+        # update distance weights
+        if x is not None and data is not None and neighbor_distances is not None and len(neighbor_distances) > 0:
+            diffs = x[self.race_dist_idxs] - data[neighbor_idxs][:, self.race_dist_idxs]
+            grad = np.sum(error * (diffs**2) / (2 * neighbor_distances[:, None]), axis=0).astype(float)
+            self.distance_weights -= self.lr_distance * grad
+            self.distance_weights = np.maximum(self.distance_weights, 0)  # keep non-negative
+            self.distance_weights /= np.sum(self.distance_weights)  # normalize
 
     def get_closest_points(self, X, y) -> list[int]:
         """mock dist function: return all data points with the same id and distance class
@@ -193,18 +202,24 @@ class SplinesSGD:
             )
         ]
 
-    def compute_y(self, 
-        all_data: np.array, 
+    def compute_y(self,
+        all_data: np.array,
         x: np.array
-    ) -> tuple[float, np.array]:
+    ) -> tuple[float, np.array, np.array, np.array]:
         neighbor_idxs = self.get_closest_points(
-            X = all_data, 
+            X = all_data,
             y = x
         )
 
-        neighbor_distances = #TODO: fill out
+        neighbor_data = all_data[neighbor_idxs]
+        diffs = x[self.race_dist_idxs] - neighbor_data[:, self.race_dist_idxs]
+        neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
-        #TODO: keep only closest 25 neighbors
+        # keep only closest 25 neighbors
+        if len(neighbor_idxs) > 25:
+            sorted_idx = np.argsort(neighbor_distances)[:25]
+            neighbor_idxs = np.array(neighbor_idxs)[sorted_idx].tolist()
+            neighbor_distances = neighbor_distances[sorted_idx]
 
         s_feature_vals: np.array = np.vstack([
             spline.compute(indexes = neighbor_idxs)
@@ -213,7 +228,7 @@ class SplinesSGD:
         neighbor_scores = np.prod(s_feature_vals, axis = 0) #only feature for rank*h
         neighbor_scores = np.array(neighbor_scores)/len(neighbor_idxs)  #  shape (10,)
         y_pred = np.sum(neighbor_scores)
-        return y_pred, neighbor_idxs, neighbor_scores
+        return y_pred, neighbor_idxs, neighbor_scores, neighbor_distances
 
     possible_buckets = [
         [1, 3],
@@ -265,29 +280,32 @@ class SplinesSGD:
         Y_pred = []
         neighbor_scores_s = []
         neighbor_idxs_s = []
+        neighbor_distances_s = []
         for index in indices:
-            new_y_pred, new_neighbor_idxs, new_neighbor_scores = self.compute_y(
-                all_data = data, 
+            new_y_pred, new_neighbor_idxs, new_neighbor_scores, new_neighbor_distances = self.compute_y(
+                all_data = data,
                 x = data[index]
             )
             Y_pred.append(new_y_pred)
             neighbor_scores_s.append(new_neighbor_scores)
             neighbor_idxs_s.append(new_neighbor_idxs)
-        return Y_pred, neighbor_idxs_s, neighbor_scores_s
+            neighbor_distances_s.append(new_neighbor_distances)
+        return Y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s
 
     def training_step(self, Y_true, indices, data):
-        Y_pred, neighbor_idxs_s, neighbor_scores_s = self.predict_ranking_for_race(
+        Y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s = self.predict_ranking_for_race(
             indices,
             data
         )
         errors = self.calculate_errors(Y_pred, Y_true)
-        
-        #TODO: update weights of distance metric
 
-        for error, neighbor_scores, neighbor_idxs in zip(errors, neighbor_scores_s, neighbor_idxs_s):
+        for i, (error, neighbor_scores, neighbor_idxs, neighbor_distances) in enumerate(zip(errors, neighbor_scores_s, neighbor_idxs_s, neighbor_distances_s)):
+            index = indices[i]
+            x = data[index]
+
             # softmax weights for distributing gradient across neighbors
             softmax_w = np.exp(neighbor_scores) / np.sum(np.exp(neighbor_scores))
-            self.grad_descend_pass(neighbor_idxs, softmax_w, error)
+            self.grad_descend_pass(neighbor_idxs, softmax_w, error, x=x, data=data, neighbor_distances=neighbor_distances)
         return errors
 
 
@@ -355,7 +373,7 @@ def compute_model_performance(All, Y, model: SplinesSGD):
 
         race_pred = []
 
-        y_pred, neighbor_idxs_s, neighbor_scores_s = model.predict_ranking_for_race(
+        y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s = model.predict_ranking_for_race(
             random_rider_idxs,
             All
         )
@@ -378,7 +396,7 @@ def compute_model_performance(All, Y, model: SplinesSGD):
     mae = mean_absolute_error(Y_true_buckets, Y_pred_buckets)
     r2  = r2_score(Y_true_buckets, Y_pred_buckets)
 
-
+    print(model.distance_weights)
     model.plot_learned_splines()
     return {
         "MSE": mse,
