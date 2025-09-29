@@ -6,6 +6,7 @@ import rbo
 import hashlib
 import itertools
 from pprint import pprint
+from typing import List, Dict
 
 
 
@@ -41,7 +42,7 @@ def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalize
     ]).sort("knn_distance").head(k)
     return knn_races
 
-def normalize_race_data(races_df: pl.DataFrame):
+def normalize_race_data(races_df: pl.DataFrame) -> pl.DataFrame:
 
     return races_df.with_columns([
         (pl.col(c) - pl.col(c).min()) / (pl.col(c).max() - pl.col(c).min())
@@ -106,7 +107,7 @@ def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
     # print(results)
     return pl.DataFrame(results)
 
-def score(rider: pl.DataFrame, race: pl.DataFrame, normalized_races_df: pl.DataFrame, results_similarity_df: pl.DataFrame, results_df: pl.DataFrame):
+def score(rider: pl.DataFrame, race: pl.DataFrame, normalized_races_df: pl.DataFrame, results_similarity_df: pl.DataFrame, results_df: pl.DataFrame) -> pl.DataFrame:
 
     race_similarity_weights = find_most_similar_races(normalised_upcoming_race_df=race, normalized_races_df=normalized_races_df, k = -1)
     # print(race_similarity_weights)
@@ -287,7 +288,7 @@ def fillout_races_without_profile_scores(races_df: pl.DataFrame, results_similar
 def scores_to_probability_results(rider_scores: pl.DataFrame, participants: pl.DataFrame) -> pl.DataFrame:
     #convert rider scores to probability of getting each result for each rider
 
-    def compute_plackett_luce_probs(scores, max_rank_to_predict=5) -> dict[int, list[float]]:
+    def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int = 5) -> Dict[int, List[float]]:
         # edge cases
         n = len(scores)
         if n == 0:
@@ -308,7 +309,7 @@ def scores_to_probability_results(rider_scores: pl.DataFrame, participants: pl.D
                         denom = total_sum - scores[j]
                         if denom > 0:
                             new_probs[i] += current_probs[j] * (scores[i] / denom)
-            rank_probs[pos] ==  new_probs
+            rank_probs[pos] = new_probs
             current_probs = new_probs
         return rank_probs
 
@@ -330,7 +331,7 @@ def scores_to_results(rider_scores: pl.DataFrame, participants: pl.DataFrame, ra
         how = "left"
     ).sort("score", descending=True).with_row_index("predicted_result", offset=1)
 
-def create_feature_table(results, races):
+def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataFrame:
     spine = ["name", "race_id"]
     race_distance_features = [
         "distance_km", 

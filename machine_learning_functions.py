@@ -7,19 +7,36 @@ import polars as pl
 import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import sympy as sp
+from typing import List, Dict, Tuple, Callable, Any, Optional
 
 
 class Spline():
+    """
+    Represents a spline for modeling nonlinear relationships in a single feature.
+
+    This class uses Generalized Additive Models (GAM) to create spline basis functions
+    and learns weights through gradient descent for feature transformation.
+    """
 
     lr = 1e-3
     def __init__(
         self,
-        spline_init_func: callable, 
-        n_splines: int, 
-        feature_idx: int, 
-        feature_name: str, 
-        all_data: np.array
-    ):  
+        spline_init_func: Callable,
+        n_splines: int,
+        feature_idx: int,
+        feature_name: str,
+        all_data: np.ndarray
+    ):
+        """
+        Initializes the Spline object.
+
+        Args:
+            spline_init_func: Function to initialize spline weights.
+            n_splines: Number of spline basis functions.
+            feature_idx: Index of the feature in the data array.
+            feature_name: Name of the feature for plotting.
+            all_data: Full dataset array (n_samples, n_features).
+        """  
         self.feature_idx = feature_idx
         self.feature_name = feature_name
         self.gam = LinearGAM(s(0, n_splines=n_splines)).fit(all_data[:,[feature_idx]], all_data[:, [feature_idx]])
@@ -30,10 +47,19 @@ class Spline():
         self.weights = self.weights_init.copy()
         self.basis = self.gam._modelmat(all_data[:,[feature_idx]])
 
-    def compute(self, indexes: list[int]) -> np.array:
+    def compute(self, indexes: List[int]) -> np.ndarray:
+        """
+        Computes spline values for given data indices.
+
+        Args:
+            indexes: List of row indices in the data.
+
+        Returns:
+            np.ndarray: Spline-transformed values for each index.
+        """
         return self.basis[indexes] @ self.weights
 
-    def _init_spline(self, data: np.array, init_func: callable) -> np.array:
+    def _init_spline(self, data: np.ndarray, init_func: Callable) -> np.ndarray:
         """
         Initializes spline weights by fitting a least squares solution to the provided data and initialization function.
 
@@ -50,31 +76,23 @@ class Spline():
         weights, *_ = np.linalg.lstsq(B_grid.toarray(), y_target, rcond=None)
         return weights
     
-    def grad_descend_pass(self, neighbor_idxs, softmax_w, error):
-        # lam2 = 10.0
-        # smooth_penalties = [
-        #     spline_weights.T @ penalty_matrix @ spline_weights
-        #     for spline_weights, penalty_matrix in zip(self.weights, self.Ps) 
-        # ]
-        
-        # Total loss
-        # total_loss = mse_loss + self.lam_smooth * smooth_penalty
-        
-        # # Gradients
-        # # ∂MSE/∂β = -2 * X^T @ (y - X @ β) / n
-        # mse_grad = -2 * X_basis.T @ (y - y_pred) / len(y)
-        
-        # # ∂smooth_penalty/∂β = 2 * P @ β
-        # smooth_grad = 2 * self.lam_smooth * P @ coefficients
-        
-        # # Total gradient
-        # total_grad = mse_grad + smooth_grad
+    def grad_descend_pass(self, neighbor_idxs: List[int], softmax_w: np.ndarray, error: np.ndarray) -> None:
+        """
+        Performs a gradient descent update on spline weights.
 
+        Args:
+            neighbor_idxs: Indices of neighboring data points.
+            softmax_w: Softmax weights for gradient distribution.
+            error: Error values for each neighbor.
+        """
         weighted_basis_sum = softmax_w * self.basis[neighbor_idxs]
         gradient_pass = error * weighted_basis_sum
         self.weights -= self.lr * gradient_pass
 
-    def plot_learned_spline(self):
+    def plot_learned_spline(self) -> None:
+        """
+        Plots the learned spline curve against the initial spline.
+        """
         XX = self.gam.generate_X_grid(term=0)   # only 1D in gam_f2 and gam_f3
         B = self.gam._modelmat(XX)              # spline basis on that grid
         y_hat = B @ self.weights                 # spline curve
@@ -102,10 +120,22 @@ class Spline():
     #     return P
 
 class SplinesSGD:
-    
+    """
+    Stochastic Gradient Descent model using splines for nonlinear feature transformations.
+
+    Learns spline weights and distance weights to predict rider rankings based on
+    historical performance and race characteristics.
+    """
+
     nr_riders_per_race = 5
 
-    def __init__(self, X):
+    def __init__(self, X: np.ndarray) -> None:
+        """
+        Initializes the SplinesSGD model.
+
+        Args:
+            X: Training data array (n_samples, n_features).
+        """
         # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
         # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
         # 10-11: age | rank_bucket  
@@ -127,7 +157,7 @@ class SplinesSGD:
         )
         self.lr_distance = 1e-4
 
-        self.splines: list[Spline] = [
+        self.splines: List[Spline] = [
             Spline(
                 spline_init_func = self.init_feature_funcs[feature_idx], 
                 n_splines = 15, 
@@ -140,7 +170,16 @@ class SplinesSGD:
             )
         ] 
     
-    def _init_feature_funcs(self, X):
+    def _init_feature_funcs(self, X: np.ndarray) -> Dict[int, Callable]:
+        """
+        Initializes feature-specific spline functions based on data statistics.
+
+        Args:
+            X: Training data array.
+
+        Returns:
+            Dict mapping feature indices to initialization functions.
+        """
         #init splines to some base functions
         rank_max = 40
         def rank_spline_init(x): #0-> 1,  40-> 0
@@ -172,7 +211,18 @@ class SplinesSGD:
             11: rank_bucket_init,
         }
 
-    def grad_descend_pass(self, neighbor_idxs, softmax_w, error, x=None, data=None, neighbor_distances=None):
+    def grad_descend_pass(self, neighbor_idxs: List[int], softmax_w: np.ndarray, error: np.ndarray, x: Optional[np.ndarray] = None, data: Optional[np.ndarray] = None, neighbor_distances: Optional[np.ndarray] = None) -> None:
+        """
+        Performs gradient descent on splines and distance weights.
+
+        Args:
+            neighbor_idxs: Indices of neighboring data points.
+            softmax_w: Softmax weights for gradient distribution.
+            error: Error values.
+            x: Current data point (optional).
+            data: Full dataset (optional).
+            neighbor_distances: Distances to neighbors (optional).
+        """
         for spline in self.splines:
             spline.grad_descend_pass(
                 neighbor_idxs = neighbor_idxs,
@@ -188,10 +238,17 @@ class SplinesSGD:
             self.distance_weights = np.maximum(self.distance_weights, 0)  # keep non-negative
             self.distance_weights /= np.sum(self.distance_weights)  # normalize
 
-    def get_closest_points(self, X, y) -> list[int]:
-        """mock dist function: return all data points with the same id and distance class
-        
-        more entries noramlly for A than for B"""
+    def get_closest_points(self, X: np.ndarray, y: np.ndarray) -> List[int]:
+        """
+        Finds historical data points for the same rider in different races.
+
+        Args:
+            X: Full dataset.
+            y: Current data point.
+
+        Returns:
+            List of indices of similar historical points.
+        """
         return [
             i
             for i, data_point in enumerate(X)
@@ -203,9 +260,21 @@ class SplinesSGD:
         ]
 
     def compute_y(self,
-        all_data: np.array,
-        x: np.array
-    ) -> tuple[float, np.array, np.array, np.array]:
+        all_data: np.ndarray,
+        x: np.ndarray,
+        k: int = 25,
+    ) -> Tuple[float, List[int], np.ndarray, np.ndarray]:
+        """
+        Computes predicted score for a rider in a race based on k-nearest neighbors.
+
+        Args:
+            all_data: Full dataset.
+            x: Current data point.
+            k: nr of neighbors to base calculation on.
+
+        Returns:
+            Tuple of (predicted_score, neighbor_indices, neighbor_scores, neighbor_distances).
+        """
         neighbor_idxs = self.get_closest_points(
             X = all_data,
             y = x
@@ -215,9 +284,9 @@ class SplinesSGD:
         diffs = x[self.race_dist_idxs] - neighbor_data[:, self.race_dist_idxs]
         neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
-        # keep only closest 25 neighbors
-        if len(neighbor_idxs) > 25:
-            sorted_idx = np.argsort(neighbor_distances)[:25]
+        # keep only closest k neighbors
+        if len(neighbor_idxs) > k:
+            sorted_idx = np.argsort(neighbor_distances)[:k]
             neighbor_idxs = np.array(neighbor_idxs)[sorted_idx].tolist()
             neighbor_distances = neighbor_distances[sorted_idx]
 
@@ -238,6 +307,15 @@ class SplinesSGD:
         [26, 99999]
     ]
     def ranks_to_buckets(self, ranks: np.ndarray) -> np.ndarray:
+        """
+        Converts ranking positions to bucket categories.
+
+        Args:
+            ranks: Array of ranking positions.
+
+        Returns:
+            Array of bucket indices.
+        """
         buckets = []
         for r in ranks:
             for i, b in enumerate(self.possible_buckets):
@@ -247,7 +325,7 @@ class SplinesSGD:
         assert len(ranks) == len(buckets), f"error in mapping ranks to buckets: {ranks} -> {buckets}"
         return np.array(buckets)
         
-    def calculate_errors(self, y_pred: list, y_true: np.ndarray):
+    def calculate_errors(self, y_pred_scores: List[float], y_true_ranks: np.ndarray) -> np.ndarray:
         """
         y_pred: predicted scores of each rider
         y_true: actual ranking
@@ -257,26 +335,37 @@ class SplinesSGD:
 
         current error: nr of buckets to high or to low
 
-        # e.g. pred order = 4, true order = 1 -> error = 3, should predict higher score
+        # e.g. pred order = 26, true order = 1 -> 
+        #   pred_buckets = 6 and true_bucket = 1, error = -5, should predict lower score
         #    
         # e.g. -2 -> predicted order was 2 and true order was 4 -> should predict lower
         # e.g. 6 -> predicited order was 8 and true order was 2 -> should predict higher
         """
-        y_true_order = np.argsort(np.argsort(y_true)) #higher rank -> later in order
+        y_true_order = np.argsort(np.argsort(y_true_ranks)) #higher rank -> later in order
 
-        y_pred_order = np.argsort(np.argsort( -1 * np.array(y_pred))) #higher score -> early in order
+        y_pred_order = np.argsort(np.argsort( -1 * np.array(y_pred_scores))) #higher score -> early in order
         
         y_pred_ranks = [
-            y_true[np.where(y_true_order == order_to_find)[0]][0]
+            y_true_ranks[np.where(y_true_order == order_to_find)[0]][0]
             for order_to_find in y_pred_order
         ]
 
 
-        errors = self.ranks_to_buckets(y_pred_ranks) - self.ranks_to_buckets(y_true)
+        errors = self.ranks_to_buckets(y_true_ranks) - self.ranks_to_buckets(y_pred_ranks)
 
         return errors
 
-    def predict_ranking_for_race(self, indices, data):
+    def predict_ranking_for_race(self, indices: List[int], data: np.ndarray) -> Tuple[List[float], List[List[int]], List[np.ndarray], List[np.ndarray]]:
+        """
+        Predicts scores for multiple riders in a race.
+
+        Args:
+            indices: Indices of riders to predict.
+            data: Full dataset.
+
+        Returns:
+            Tuple of predictions, neighbor indices, neighbor scores, and distances.
+        """
         Y_pred = []
         neighbor_scores_s = []
         neighbor_idxs_s = []
@@ -292,7 +381,18 @@ class SplinesSGD:
             neighbor_distances_s.append(new_neighbor_distances)
         return Y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s
 
-    def training_step(self, Y_true, indices, data):
+    def training_step(self, Y_true: np.ndarray, indices: List[int], data: np.ndarray) -> np.ndarray:
+        """
+        Performs one training step: predict, compute errors, and update weights.
+
+        Args:
+            Y_true: True rankings.
+            indices: Rider indices.
+            data: Full dataset.
+
+        Returns:
+            Array of errors for each rider.
+        """
         Y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s = self.predict_ranking_for_race(
             indices,
             data
@@ -309,29 +409,58 @@ class SplinesSGD:
         return errors
 
 
-    def plot_learned_splines(self):
+    def plot_learned_splines(self) -> None:
         for spline in self.splines:
             spline.plot_learned_spline()
             
 
-def split_train_test(All: pl.DataFrame, test_ratio=0.2) -> tuple[np.ndarray, np.ndarray]:
+def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Splits a Polars DataFrame into train and test numpy arrays.
+
+    Args:
+        All: Full dataset DataFrame.
+        test_ratio: Fraction for test set.
+
+    Returns:
+        Tuple of (train_array, test_array).
+    """
     split_idx = int((1 - test_ratio) * All.height)
     return All[:split_idx].to_numpy(), All[split_idx:].to_numpy()
 
-def get_random_riders(All, race_id, min_nr = 6):
+def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6) -> np.ndarray:
+    """
+    Selects random riders from a race, balancing top and bottom performers.
+
+    Args:
+        All: Full dataset.
+        race_id: ID of the race.
+        min_nr: Minimum number of riders to select.
+
+    Returns:
+        Array of selected rider indices.
+    """
     top_rider_idxs = np.where(
         (All[:,1] == race_id) & (All[:, 8] <= 25)
     )[0] #top 25 results
     bottom_rider_idxs = np.where(
         (All[:,1] == race_id) & (All[:, 8] >= 25)
     )[0] #bottom results
-    n = min(min_nr , len(bottom_rider_idxs))
+    n = min(min_nr , min(int(len(top_rider_idxs)/2+1), len(bottom_rider_idxs)))
     return np.concatenate((
         np.random.choice(top_rider_idxs, size=int(n/2), replace=False),
         np.random.choice(bottom_rider_idxs, size=int(n/2), replace=False)
     ))
 
-def train_model(All, X, spline_model: SplinesSGD):
+def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> None:
+    """
+    Trains the spline model using stochastic gradient descent.
+
+    Args:
+        All: Full dataset.
+        X: Training subset.
+        spline_model: Model instance to train.
+    """
     nr_riders_per_race = 6
     epochs = 1000
     total_loss = 0
@@ -341,6 +470,7 @@ def train_model(All, X, spline_model: SplinesSGD):
 
         if len(random_rider_idxs) < nr_riders_per_race:
             continue
+            print(f"continued")
 
         Y_true = All[random_rider_idxs, 8]
         errors = spline_model.training_step(
@@ -355,7 +485,18 @@ def train_model(All, X, spline_model: SplinesSGD):
             total_loss = 0
 
 
-def compute_model_performance(All, Y, model: SplinesSGD):
+def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD) -> Dict[str, float]:
+    """
+    Evaluates model performance on test races.
+
+    Args:
+        All: Full dataset.
+        Y: Test subset.
+        model: Trained model.
+
+    Returns:
+        Dict of performance metrics (MSE, MAE, R2).
+    """
     test_size = 50
     race_ids = np.unique(Y[:, 1])
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
@@ -405,7 +546,7 @@ def compute_model_performance(All, Y, model: SplinesSGD):
     }
 
 
-def main():
+def main() -> None:
     race_result_features = pl.read_parquet("data/features_df.parquet")
 
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
