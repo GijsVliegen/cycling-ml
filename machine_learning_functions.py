@@ -8,6 +8,8 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import sympy as sp
 from typing import List, Dict, Tuple, Callable, Any, Optional
+import mlflow
+import mlflow.pyfunc
 
 
 class Spline():
@@ -414,6 +416,36 @@ class SplinesSGD:
             spline.plot_learned_spline()
             
 
+class MLflowWrapper(mlflow.pyfunc.PythonModel):
+    """
+    MLflow wrapper for SplinesSGD model to enable logging and loading.
+    """
+
+    def __init__(self, model: SplinesSGD):
+        self.model = model
+
+    def predict(self, context, race_id: int) -> Dict[str, Any]:
+        """
+        Predicts top 25 riders for a given race.
+
+        Args:
+            context: MLflow context.
+            race_id: int
+
+        Returns:
+            Dict with 'top_riders' and 'top_scores'.
+        """
+        All = np.load('data/All.npy')
+        rider_idxs = np.where(All[:, 1] == race_id)[0]
+        if len(rider_idxs) == 0:
+            return {'top_riders': [], 'top_scores': []}
+        Y_pred, _, _, _ = self.model.predict_ranking_for_race(rider_idxs.tolist(), All)
+        sorted_idxs = np.argsort(Y_pred)[::-1][:25]
+        top_riders = All[rider_idxs[sorted_idxs], 0]
+        top_scores = np.array(Y_pred)[sorted_idxs]
+        return {'top_riders': top_riders.tolist(), 'top_scores': top_scores.tolist()}
+
+
 def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
     """
     Splits a Polars DataFrame into train and test numpy arrays.
@@ -462,7 +494,7 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
         spline_model: Model instance to train.
     """
     nr_riders_per_race = 6
-    epochs = 1000
+    epochs = 100
     total_loss = 0
     for epoch in range(epochs):
         random_race_id = np.random.choice(X[:,1]) #take id out of X
@@ -552,18 +584,52 @@ def main() -> None:
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     All = np.concatenate(X_Y)
     spline_model = SplinesSGD(All)
-    
-    train_model(All, X_Y[0], spline_model)
 
+    with mlflow.start_run():
+        mlflow.log_param("lr", Spline.lr)
+        mlflow.log_param("lr_distance", spline_model.lr_distance)
+        mlflow.log_param("epochs", 1000)
+        mlflow.log_param("n_splines", 15)
 
-    # test_prediction = predict(X, test_race, B_f2, B_f3, B_rank, alpha, beta, gamma)
-    # pprint.pprint(test_prediction)
-    model_perf_dict = compute_model_performance(All, X_Y[1], model=spline_model)
+        train_model(All, X_Y[0], spline_model)
+
+        model_perf_dict = compute_model_performance(All, X_Y[1], model=spline_model)
+        for key, value in model_perf_dict.items():
+            mlflow.log_metric(key, value)
+
+        # Log the model
+        mlflow.pyfunc.log_model(
+            "model",
+            python_model=MLflowWrapper(spline_model),
+            registered_model_name="SplinesSGD"
+        )
+
     print("Model performance on test set:", model_perf_dict)
     
+def predict_top25_for_race(race_id: Any) -> Dict[str, Any]:
+    """
+    Loads the trained model from MLflow and predicts top 25 riders for a race.
+
+    Args:
+        race_id: ID of the race to predict.
+
+    Returns:
+        Dict with 'top_riders' and 'top_scores'.
+    """
+    # Load the model; adjust the URI as needed (e.g., "models:/SplinesSGD/Production")
+    model = mlflow.pyfunc.load_model("models:/SplinesSGD/Production")
+    return model.predict({'race_id': race_id})
+
+def main2():
+    race_result_features = pl.read_parquet("data/features_df.parquet")
+    random_race_id = race_result_features.select(pl.col("race_id").unique()).sample(1).row(0)[0]
+
+    predict_top25_for_race(random_race_id)
+
 
 if __name__ == "__main__":
-    main()
+    # main()
+    main2()
 
 # Quick decision flow (what to try, in order)
 
@@ -576,57 +642,6 @@ if __name__ == "__main__":
 # Use ensemble of GAM + GBDT if you need better predictive power and can afford complexity.
 
 
-#nonlinearities: of fgetting the score of a rider for each race
-# and then adding all the scores to get a total score:
-#model training options
-
-
-# Tree-based models (e.g. Gradient Boosted Trees, Random Forest):
-# → Yes, they can approximate such nonlinearities, though not in closed form. They partition the feature space, so they’d learn "if feature_d is big, reduce score," etc. They approximate your formula but don’t give a clean multiplicative form.
-# Let tree models approximate it:
-# If interpretability isn’t critical, XGBoost / LightGBM will discover nonlinear interactions and approximate the shape of your formula automatically.
-
-
-# Generalized Additive Models (GAMs):
-# → They can learn separate nonlinear transformations per feature (e.g. the curve 
-# 1/(x+1)
-# 1/(x+1)), and then sum them. But they add them, not multiply.
-# → You could log-transform your score and use GAM, because:
-
-# log⁡(score)=−log⁡(a)−log⁡(b+1)+log⁡(1+c)−log⁡(d+1)
-# log(score)=−log(a)−log(b+1)+log(1+c)−log(
-# d
-
-
-
-#Training, A energy-based model:
-# Use NLL (cross-entropy) against the true label as the primary loss. You can add a small entropy regularizer if you want to penalize over-confidence (a confidence penalty), not minimize entropy.
-
-# Regularization you should use
-
-# Smoothing penalty on each spline term (limits wiggliness). Libraries usually provide/optimize this.
-
-# L2 penalty on coefficients (ridge) — helps stability if you use basis expansions.
-
-# Temperature / calibration: make 
-# T
-# T a hyperparameter or learn a scalar on a validation set.
-
-# Diagnostics / tests
-
-# Plot each learned 
-# fj(xj)
-
-# ) to check they are sensible (GAMs give these directly).
-
-# Check cross-validated NLL and classification metrics.
-
-# Check calibration curves (Brier score, reliability diagrams).
-
-# Measure confidence / entropy on out-of-distribution examples — watch for overconfidence.
-
-
-
-
 #Training preidicting high results is more important:
 # sklearn estimators usually accept sample_weight in .fit(X,y, sample_weight=...)
+
