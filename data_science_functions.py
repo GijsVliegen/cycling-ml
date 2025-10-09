@@ -467,8 +467,34 @@ def main():
     print(features_df)
     features_df.write_parquet("data/features_df.parquet")
 
+def check_features_stats():
+    """
+    Check statistics on features: rider entries, races per year, and races per classification.
+    Computes everything from the data/features_df.parquet table.
+    """
+    features_df = pl.read_parquet("data/features_df.parquet")
+
+    # Rider entries stats
+    rider_entries = features_df.group_by("name").agg(pl.len().alias("num_entries"))
+    avg_entries = rider_entries.select(pl.col("num_entries").mean()).item()
+    min_entries = rider_entries.select(pl.col("num_entries").min()).item()
+    max_entries = rider_entries.select(pl.col("num_entries").max()).item()
+    print(f"Rider entries - Avg: {avg_entries:.2f}, Min: {min_entries}, Max: {max_entries}")
+
+    # Races per year
+    races_per_year = features_df.with_columns(
+        pl.col("date").str.strptime(pl.Date, "%Y-%m-%d", strict=False).dt.year().alias("year")
+    ).group_by("year").agg(pl.col("race_id").n_unique().alias("num_races")).sort("year")
+    print("Races per year:")
+    print(races_per_year)
+
+    # Races per classification
+    races_per_classification = features_df.group_by("classification").agg(pl.col("race_id").n_unique().alias("num_races")).sort("classification")
+    print("Races per classification:")
+    print(races_per_classification)
 
 if __name__ == "__main__":
-    main()
+    # main()
     # check_results_df()
     # check_races_df()
+    check_features_stats()
