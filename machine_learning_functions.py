@@ -507,6 +507,7 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank =
         np.random.choice(bottom_rider_idxs, size=int(n/2), replace=False)
     ))
 
+from time import time
 def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: torch.tensor) -> None:
     """
     Trains the spline model using stochastic gradient descent.
@@ -520,20 +521,7 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
     epochs = 500
     total_loss = 0
 
-    # torch_data = np.zeros(All.shape, dtype=float)
-    # for j in range(All.shape[1]):
-    #     col = All[:, j]
-    #     try:
-    #         torch_data[:, j] = col.astype(float)#.float()
-    #     except (ValueError, TypeError):
-    #         torch_data[:, j] = 0.0
-    # torch_data = torch.from_numpy(torch_data).float()
-
-
-    # for f in torch_data.T: #iterate over all cols
-    #     print(f.min(), f.max())
-    #     print(torch.isnan(f).any(), torch.isinf(f).any())
-
+    start_time = time()
 
     for epoch in range(epochs):
         random_race_id = np.random.choice(X[:,1])
@@ -553,16 +541,12 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
         total_loss += loss
 
         if epoch % (epochs/10) == 0:
-
             print(f"Epoch {epoch}, Loss: {total_loss}")
             model.plot_parameters()
             total_loss = 0
-
-            # for f in spline_model.feature_functions:
-            #     for name, param in f.net.named_parameters():
-            #         if param.grad is not None:
-            #             print(name, param.grad.abs().mean().item())
-
+    training_time = time() - start_time
+    print(f"training time (s) = {training_time}")
+    return training_time
 
 def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, torch_data: torch.tensor) -> Dict[str, float]:
     """
@@ -665,9 +649,14 @@ def main() -> None:
         mlflow.log_param("epochs", 1000)
         mlflow.log_param("n_splines", 15)
 
-        train_model(All, X_Y[0], neural_net, torch_data=torch_data)
+        training_time = train_model(All, X_Y[0], neural_net, torch_data=torch_data)
 
-        model_perf_dict = compute_model_performance(All, X_Y[1], model=neural_net, torch_data=torch_data)
+        model_perf_dict = compute_model_performance(
+            All, X_Y[1], model=neural_net, torch_data=torch_data
+        ) | {
+            "training_time_seconds": training_time
+        }
+
         for key, value in model_perf_dict.items():
             mlflow.log_metric(key, value)
 
@@ -681,19 +670,19 @@ def main() -> None:
     print("Model performance on test set:", model_perf_dict)
 
 
-    random_race_id = race_result_features.select(pl.col("race_id").unique()).sample(1).row(0)[0]
-    rider_idxs = get_random_riders(All, random_race_id, 10, min_rank = 10)
-    rider_names = All[rider_idxs, 0]
+    # random_race_id = race_result_features.select(pl.col("race_id").unique()).sample(1).row(0)[0]
+    # rider_idxs = get_random_riders(All, random_race_id, 10, min_rank = 10)
+    # rider_names = All[rider_idxs, 0]
     
-    Y_true_ranking = All[rider_idxs, 8]
-    Y_pred_scores = neural_net.predict_ranking_for_race(
-        rider_idxs,
-        All,
-        torch_data=torch_data
-    )
-    pprint.pprint({'riders': rider_names.tolist()})
-    pprint.pprint({'scores': Y_pred_scores.tolist()})
-    pprint.pprint({'real ranking': Y_true_ranking.tolist()})
+    # Y_true_ranking = All[rider_idxs, 8]
+    # Y_pred_scores = neural_net.predict_ranking_for_race(
+    #     rider_idxs,
+    #     All,
+    #     torch_data=torch_data
+    # )
+    # pprint.pprint({'riders': rider_names.tolist()})
+    # pprint.pprint({'scores': Y_pred_scores.tolist()})
+    # pprint.pprint({'real ranking': Y_true_ranking.tolist()})
 
 
     
