@@ -13,6 +13,7 @@ import mlflow.pyfunc
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 
 class NeuralNet(nn.Module):
@@ -24,7 +25,7 @@ class NeuralNet(nn.Module):
         super().__init__()
         
         if nr_of_features == 1:
-            self.model = nn.Sequential(
+            self.net = nn.Sequential(
                 nn.Linear(1, 16),
                 nn.ReLU(),
                 nn.Linear(16, 1)
@@ -49,6 +50,7 @@ class NeuralNet(nn.Module):
                 nn.Linear(16 * nr_of_features, 1)
             )
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        # self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.001)
         self.criterion = nn.MarginRankingLoss(margin=1.0)
 
         self.separate_inputs = nr_of_features > 2 and not correlated
@@ -65,264 +67,16 @@ class NeuralNet(nn.Module):
 
         else: 
             return self.net(x)
-        
-    def preference_update(self, input1: float, input2: float, higher_is_1: bool = True) -> float:
-        """
-        Updates the network based on preference: whether input1 should score higher than input2.
 
-        Args:
-            input1: Tensor for first input.
-            input2: Tensor for second input.
-            higher_is_1: True if input1 should have higher score than input2.
-
-        Returns:
-            Loss value.
-        """
-        score1 = self.forward(torch.tensor(input1))
-        score2 = self.forward(torch.tensor(input2))
-        target = torch.tensor(1.0 if higher_is_1 else -1.0, dtype=torch.float32)
-        loss = self.criterion(score1, score2, target)
-        self.optimizer.zero_grad()
-        loss.backward()
+    def step(self):
+        torch.nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)
         self.optimizer.step()
-        return loss.item()
-
-
-    def grad_descent_pass(self, 
-        predicted_neigbor_scores: np.array,  #for each neighbor for each rider
-        true_scores: np.array, 
-        margin: float = 1.0
-    ) -> float:
-        """
-        Updates the network based on a list of predicted scores and their true ordering.
-
-        Args:
-            predicted_scores: List of predicted score tensors.
-            y: List of true rankings (lower y means higher rank, e.g., y=[3,1,2] means 2nd > 3rd > 1st).
-            margin: Margin for the ranking loss. TODO: use margin parameter
-
-        Returns:
-            Total loss value.
-        """
-        pos_target = torch.tensor(1.0, dtype=torch.float32)
-        neg_target = torch.tensor(-1.0, dtype=torch.float32)
-
-        total_loss = 0.0
-        num_pairs = 0
-        for i in range(len(y)):
-            for j in range(i + 1, len(y)):
-                if y[i] < y[j]:  # i should have higher score than j
-                    loss = self.criterion(predicted_scores[i], predicted_scores[j], pos_target)
-                elif y[j] < y[i]:  # j should have higher score than i
-                    loss = self.criterion(predicted_scores[i], predicted_scores[j], neg_target)
-                else:
-                    continue  # equal, skip
-                total_loss += loss
-                num_pairs += 1
-        if num_pairs > 0:
-            total_loss /= num_pairs
+    
+    def zero_grad(self):
         self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
-        return total_loss.item()
-class Spline():
-    """
-    Represents a spline for modeling nonlinear relationships in a single feature.
 
-    This class uses Generalized Additive Models (GAM) to create spline basis functions
-    and learns weights through gradient descent for feature transformation.
-    """
-
-    lr = 1e-3
-    def __init__(
-        self,
-        spline_init_func: Callable,
-        n_splines: int,
-        feature_idx: int,
-        feature_name: str,
-        all_data: np.ndarray
-    ):
-        """
-        Initializes the Spline object.
-
-        Args:
-            spline_init_func: Function to initialize spline weights.
-            n_splines: Number of spline basis functions.
-            feature_idx: Index of the feature in the data array.
-            feature_name: Name of the feature for plotting.
-            all_data: Full dataset array (n_samples, n_features).
-        """  
-        self.feature_idx = feature_idx
-        self.feature_name = feature_name
-        self.gam = LinearGAM(s(0, n_splines=n_splines)).fit(all_data[:,[feature_idx]], all_data[:, [feature_idx]])
-        self.weights_init = self._init_spline(
-            data = all_data, 
-            init_func = spline_init_func
-        )
-        self.weights = self.weights_init.copy()
-        self.basis = self.gam._modelmat(all_data[:,[feature_idx]])
-
-    def compute(self, indexes: List[int]) -> np.ndarray:
-        """
-        Computes spline values for given data indices.
-
-        Args:
-            indexes: List of row indices in the data.
-
-        Returns:
-            np.ndarray: Spline-transformed values for each index.
-        """
-        return self.basis[indexes] @ self.weights
-
-    def _init_spline(self, data: np.ndarray, init_func: Callable) -> np.ndarray:
-        """
-        Initializes spline weights by fitting a least squares solution to the provided data and initialization function.
-
-        Args:
-            data (np.array): Input data array where features are accessed by self.feature_idx.
-            init_func (callable): Function to generate target values for initialization, applied to the feature grid.
-
-        Returns:
-            np.ndarray: Array of spline weights computed from the least squares fit.
-        """
-        x_grid = np.linspace(data[:,self.feature_idx].min(), data[:,self.feature_idx].max(), 100).reshape(-1,1)
-        B_grid = self.gam._modelmat(x_grid)
-        y_target = init_func(x_grid.ravel())
-        weights, *_ = np.linalg.lstsq(B_grid.toarray(), y_target, rcond=None)
-        return weights
-    
-    def grad_descend_pass(self, neighbor_idxs: List[int], softmax_w: np.ndarray, error: np.ndarray) -> None:
-        """
-        Performs a gradient descent update on spline weights.
-
-        Args:
-            neighbor_idxs: Indices of neighboring data points.
-            softmax_w: Softmax weights for gradient distribution.
-            error: Error values for each neighbor.
-        """
-        weighted_basis_sum = softmax_w * self.basis[neighbor_idxs]
-        gradient_pass = error * weighted_basis_sum
-        self.weights -= self.lr * gradient_pass
-
-    def plot_learned_spline(self) -> None:
-        """
-        Plots the learned spline curve against the initial spline.
-        """
-        XX = self.gam.generate_X_grid(term=0)   # only 1D in gam_f2 and gam_f3
-        B = self.gam._modelmat(XX)              # spline basis on that grid
-        y_hat = B @ self.weights                 # spline curve
-
-        plt.figure()
-        plt.plot(XX[:, 0], y_hat, label="learned spline")
-
-        y_start = B @ self.weights_init
-        plt.plot(XX[:, 0], y_start, "r--", label=str(self.feature_idx))
-
-        plt.xlabel(f"f{self.feature_idx}: {self.feature_name}")
-        plt.ylabel("spline value")
-        plt.legend()
-        plt.show()
-        
-    # def _create_penalty_matrix(self, n_basis):
-    #     """
-    #     Create penalty matrix for smoothness (penalizes second derivatives).
-    #     This is the discrete approximation of the integral of squared second derivatives.
-    #     """
-    #     # Create second difference matrix
-    #     D = np.diff(np.eye(n_basis), n=2, axis=0)
-    #     # Penalty matrix is D.T @ D
-    #     P = D.T @ D
-    #     return P
-
-class Y():
-    """holds the predictions for one race"""
-    def __init__(self, ranking = None, scores = None, order = []):
-        self.ranking: np.array = ranking
-        self.order: np.array = np.argsort(np.argsort(self.ranking))
-        if ranking is None and scores is None:
-            raise AssertionError("not both scores and ranking can be None")
-        
-        self.ranking = ranking
-        self.scores = scores
-
-    possible_buckets = [
-        [1, 3],
-        [4, 8],
-        [9, 15],
-        [16, 25],
-        [26, 99999]
-    ]
-    def ranks_to_buckets(self) -> np.ndarray:
-        """
-        Converts ranking positions to bucket categories.
-
-        Args:
-            ranks: Array of ranking positions.
-
-        Returns:
-            Array of bucket indices.
-        """
-        buckets = []
-        for r in self.ranking:
-            for i, b in enumerate(self.possible_buckets):
-                if r >= b[0] and r <= b[1]:
-                    buckets.append(i)
-                    break
-        assert len(self.ranking) == len(buckets), f"error in mapping ranks to buckets: {self.ranking} -> {buckets}"
-        return np.array(buckets)
-    
-    def complete_pred_with_true(self, Y_true = None):
-        if (self.ranking is None and Y_true is None) or \
-            (self.ranking is None and Y_true.ranking is None) or \
-            (self.ranking is not None and Y_true is not None):
-            raise AssertionError("either self should have a ranking, XOR Y_true should be given with ranking")
-        if self.ranking is None:
-            self.ranking = [
-                Y_true.ranking[np.where(Y_true.order == order_to_find)[0]][0]
-                for order_to_find in self.order
-            ]
-            self.buckets: np.array = self.ranks_to_buckets()
-        else:
-            self.buckets: np.array = self.ranks_to_buckets()
-            raise AssertionError("Already a ranking present")
-
-    @classmethod
-    def from_ranking(cls, ranking: np.array):
-        return cls(
-            ranking=ranking,
-            scores=None,
-            order=np.argsort(np.argsort(ranking))
-        )
-        
-    @classmethod
-    def from_scores(cls, scores: np.array):
-        return cls(
-            ranking = None,
-            scores = scores,
-            order = np.argsort(np.argsort( -1 * np.array(scores)))
-        )
-    
-    def calculate_errors(self, Y_true) -> np.ndarray:
-        """
-        self: predicted Y
-        Y_true: actual Y
-
-        returns:
-        an error value for each rider, in the same order as y_pred
-
-        current error: nr of buckets to high or to low
-
-        # e.g. pred order = 26, true order = 1 -> 
-        #   pred_buckets = 6 and true_bucket = 1, error = -5, should predict lower score
-        #    
-        # e.g. -2 -> predicted order was 2 and true order was 4 -> should predict lower
-        # e.g. 6 -> predicited order was 8 and true order was 2 -> should predict higher
-        """
-        if self.buckets is None:
-            self.complete_pred_with_true(Y_true)
-
-        errors = Y_true.buckets - self.buckets
-        return errors
+    def plot_learned_function(self):
+        pass
 
 
     
@@ -345,11 +99,11 @@ class SplinesSGD:
         """
         # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
         # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
-        # 10-11: age | rank_bucket  
+        # 10-11: age | rank_bucket | rank_normalized
 
         self.init_feature_funcs = self._init_feature_funcs(X)
-        self.feature_idxs = [9, 11]
-        self.feature_names = ["startlist_score", "rank_bucket"]
+        self.feature_idxs = [9, 12]
+        self.feature_names = ["startlist_score", "rank_normalized"]
         self.race_dist_idxs = [2, 3, 4, 5]#, 6]
         self.race_dist_metrics = [
             "distance_km",
@@ -364,21 +118,12 @@ class SplinesSGD:
         )
         self.lr_distance = 1e-4
 
-        # self.feature_functions: List[Spline] = [
-        #     Spline(
-        #         spline_init_func = self.init_feature_funcs[feature_idx],
-        #         n_splines = 15,
-        #         feature_idx = feature_idx,
-        #         feature_name = feature_name,
-        #         all_data = X
-        #     ) for feature_idx, feature_name in zip(
-        #         self.feature_idxs,
-        #         self.feature_names
-        #     )
-        # ]
         self.feature_functions: list[NeuralNet] = [
             NeuralNet(
                 init_func = self.init_feature_funcs[feature_idx],
+                lr = 0.01,
+                nr_of_features=1,
+                correlated=False
             ) for feature_idx in self.feature_idxs
         ]
     
@@ -421,58 +166,11 @@ class SplinesSGD:
             8: rank_spline_init,
             9: startlist_score_init,
             11: rank_bucket_init,
+            12: lambda x: x
         }
 
         # self.grad_descend_pass(bucket_errors, Y_pred, Y_true, neighbor_feature_scores_3d)
-    def grad_descend_pass(self, 
-        errors: np.ndarray,
-        Y_pred: Y,
-        Y_true: Y,
-        all_neighbor_feature_scores_3d: np.array
-        ) -> None:
-        """
-        Performs gradient descent on feature_funcs and distance weights.
-
-        Args:
-            error: Error values.
-            TODO: update this documentation
-        """
-
-
-        for i, feature_func in enumerate(self.feature_functions):
-            all_neighbor_one_feature_score = all_neighbor_feature_scores_3d[
-                :, :, i
-            ]
-            all_neighbor_true_estimated_scores = all_neighbor_one_feature_score[
-                Y_true.ranking
-            ]
-            for rider_neighbors_one_feature_score, neighbor_true_estimated_scores, error in zip(
-                all_neighbor_one_feature_score,
-                all_neighbor_true_estimated_scores,
-                errors
-            ):
-                average_true_estimate_one_feature_score = np.avg(neighbor_true_estimated_scores)
-                for r_n_one_feature_score in rider_neighbors_one_feature_score:
-                    feature_func.preference_update(
-                        input_1 = r_n_one_feature_score,
-                        input2 = average_true_estimate_one_feature_score,
-                        higher_is_1= (error > 0)
-                    )
-            # feature_func.grad_descend_pass(
-            #     pred
-            #     neighbor_idxs = neighbor_idxs,
-            #     softmax_w = softmax_w,
-            #     error = error
-            # )
-
-        # update distance weights
-        # if x is not None and data is not None and neighbor_distances is not None and len(neighbor_distances) > 0:
-        #     diffs = x[self.race_dist_idxs] - data[neighbor_idxs][:, self.race_dist_idxs]
-        #     grad = np.sum(error * (diffs**2) / (2 * (neighbor_distances[:, None] + 0.001)), axis=0).astype(float)
-        #     self.distance_weights -= self.lr_distance * grad
-        #     self.distance_weights = np.maximum(self.distance_weights, 0)  # keep non-negative
-        #     self.distance_weights /= np.sum(self.distance_weights)  # normalize
-
+    
     def get_closest_points(self, X: np.ndarray, y: np.ndarray, k: int) -> List[int]:
         """
         Finds k historical data points for the same rider in different races, prioritized by best ranks.
@@ -498,44 +196,12 @@ class SplinesSGD:
         neighbors_sorted = sorted(neighbors, key=lambda i: X[i, 8])
         return neighbors_sorted[:k]
 
-    def compute_rider_scores_constituents(self,
-        all_data: np.ndarray,
-        rider: np.ndarray,
-        k: int = 25,
-    ) -> np.ndarray:
-        """
-        Computes feature scores for k-nearest neighbors of a rider in a race.
-
-        Args:
-            all_data: Full dataset.
-            x: Current data point.
-            k: Number of neighbors to base calculation on.
-
-        Returns:
-            np.ndarray: Array with each row containing the feature scores for a neighbor (shape: n_features x k).
-        """
-        neighbor_idxs = self.get_closest_points(
-            X = all_data,
-            y = rider,
-            k = k
-        )
-
-        neighbor_feature_vals = all_data[neighbor_idxs]
-        s_feature_vals: np.array = np.vstack([
-            feature_func.forward(neighbor_feature_vals[: feature_idx])
-            for feature_func, feature_idx in zip(
-                self.feature_functions,
-                self.feature_idxs
-            )
-        ])
-
-        return s_feature_vals
 
     def predict_ranking_for_race(
         self, 
         indices: List[int], 
         data: np.ndarray
-    ) -> Tuple[Y, np.ndarray, List[List[int]], List[np.ndarray]]:
+    ) -> torch.tensor:
         """
         Predicts scores for multiple riders in a race.
 
@@ -550,33 +216,18 @@ class SplinesSGD:
             list of neighbor distances
         """
         Y_pred_scores = []
-        all_neighbor_feature_scores = []
-        neighbor_idxs_s = []
-        neighbor_distances_s = []
         for index in indices:
-            neighbor_idxs = self.get_closest_points(data, data[index], k=25)
-            neighbor_data = data[neighbor_idxs]
-            diffs = data[index][self.race_dist_idxs] - neighbor_data[:, self.race_dist_idxs]
-            neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
-            neighbor_feature_scores = self.compute_rider_scores_constituents(
+            rider_score = self.forward_rider(
                 data, 
-                rider = data[index]
+                rider = data[index],
+                nr_neighbors=25
             )
-            neighbor_scores = np.prod(neighbor_feature_scores, axis=0) / len(neighbor_idxs)
 
-            #TODO: multiple distance of neighbor with score
+            Y_pred_scores.append(rider_score)
 
-            rider_pred = np.sum(neighbor_scores)
-
-            Y_pred_scores.append(rider_pred)
-            all_neighbor_feature_scores.append(neighbor_feature_scores)
-            neighbor_idxs_s.append(neighbor_idxs)
-            neighbor_distances_s.append(neighbor_distances)
-
-        all_neighbor_feature_scores_3d = np.stack(all_neighbor_feature_scores, axis=0)
-        Y_pred = Y.from_scores(Y_pred)
-        return Y_pred, all_neighbor_feature_scores_3d, neighbor_idxs_s, neighbor_distances_s
+        # Y_pred = Y.from_scores(Y_pred_scores)
+        return Y_pred_scores
 
     def training_step(self, Y_true_ranking: np.ndarray, indices: List[int], data: np.ndarray) -> np.ndarray:
         """
@@ -590,22 +241,130 @@ class SplinesSGD:
         Returns:
             Array of errors for each rider.
         """
-        Y_true = Y.from_ranking(Y_true_ranking)
-        Y_pred, neighbor_feature_scores_3d, _, _ = self.predict_ranking_for_race(
+        self._zero_grad()
+        # Y_true = Y.from_ranking(Y_true_ranking)
+        Y_true_order = np.argsort(np.argsort(Y_true_ranking))
+        Y_pred_scores = self.predict_ranking_for_race(
             indices,
             data
         )
-        bucket_errors = Y_pred.calculate_errors(Y_true)
+        loss = self._list_preference_loss(Y_pred_scores, Y_true_order)
+        loss.backward()
+        self._step()
+        # for f in self.feature_functions:
+        #     total_norm = 0
+        #     for p in f.net.parameters():
+        #         if p.grad is not None:
+        #             param_norm = p.grad.data.norm(2)
+        #             total_norm += param_norm.item() ** 2
+        #     print("Grad norm:", total_norm ** 0.5)
 
 
-        self.grad_descend_pass(bucket_errors, Y_pred, Y_true, neighbor_feature_scores_3d)
+        return loss
 
-        return bucket_errors
+    def _pairwise_preference_loss(self, score_preferred, score_rejected):
+        """a pairwise logistic loss (aka Bradley-Terry or ranking loss)"""
+        # print(f"{score_preferred:.3e}, {score_rejected:.3e}")
+        return -F.logsigmoid(score_preferred - score_rejected).mean()
+
+    def _list_preference_loss(self, scores, correct_order):
+        pairs = [
+            (i, j) 
+            for idx, i in enumerate(correct_order)
+            for j in correct_order[idx + 1:]
+        ]
+        losses = torch.vstack([
+            self._pairwise_preference_loss(
+                score_preferred = scores[pair[0]],
+                score_rejected = scores[pair[1]]
+            )
+            for pair in pairs
+        ])
+        #TODO: vectorize
+        
+        return torch.sum(losses)
+        #TODO: gather losses into one value
+
+    def _step(self):
+        
+        # TODO: update distance weights
+        # if x is not None and data is not None and neighbor_distances is not None and len(neighbor_distances) > 0:
+        #     diffs = x[self.race_dist_idxs] - data[neighbor_idxs][:, self.race_dist_idxs]
+        #     grad = np.sum(error * (diffs**2) / (2 * (neighbor_distances[:, None] + 0.001)), axis=0).astype(float)
+        #     self.distance_weights -= self.lr_distance * grad
+        #     self.distance_weights = np.maximum(self.distance_weights, 0)  # keep non-negative
+        #     self.distance_weights /= np.sum(self.distance_weights)  # normalize
+
+        for f in self.feature_functions:
+            f.step()
+
+    def _zero_grad(self):
+        for f in self.feature_functions:
+            f.zero_grad()
+
+    def forward_rider(self,
+        all_data: np.ndarray,
+        rider: np.ndarray,
+        nr_neighbors: int = 25,
+    ) -> torch.tensor:
+        """
+        Computes feature scores for k-nearest neighbors of a rider in a race.
+
+        Args:
+            all_data: Full dataset.
+            x: Current data point.
+            k: Number of neighbors to base calculation on.
+
+        Returns:
+            np.ndarray: Array with each row containing the feature scores for a neighbor (shape: n_features x k).
+        """
+        # neighbor_idxs = self.get_closest_points(data, data[index], k=25)
+
+        #TODO: multiply distance of neighbor with score
+
+        neighbor_idxs = self.get_closest_points(
+            X = all_data,
+            y = rider,
+            k = nr_neighbors
+        )
+        
+        if len(neighbor_idxs) == 0:
+            return -10
+
+        # neighbor_data = data[neighbor_idxs]
+        diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
+        neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
+        
+        neighbor_feature_vals = all_data[neighbor_idxs]
+
+        neighbor_scores: torch.tensor = torch.prod(
+            torch.stack([
+                f.forward(
+                    torch.from_numpy(neighbor_feature_vals[:, i : i + 1].astype(float)).float()
+                ) 
+                for i, f in zip(
+                    self.feature_idxs,
+                    self.feature_functions
+                )
+            ]),
+            dim = 0
+        ).squeeze(-1)
+        if torch.isnan(neighbor_scores).any() or torch.isinf(neighbor_scores).any() or neighbor_scores.numel() == 0:
+            print("debug here")
+            print(neighbor_scores)
+        # print(f"highest score = {neighbor_scores.max():.3e}, lowest score = {neighbor_scores.min():.3e}")
+        #TODO: aggregate with prod or with sum???
 
 
-    def plot_learned_splines(self) -> None:
-        for spline in self.feature_functions:
-            spline.plot_learned_spline()
+        rider_score = neighbor_scores.mean()
+        
+        #TODO: add distance weights
+
+        return rider_score
+
+    def plot_learned_functions(self) -> None:
+        for f in self.feature_functions:
+            f.plot_learned_function()
             
 
 class MLflowWrapper(mlflow.pyfunc.PythonModel):
@@ -629,13 +388,14 @@ class MLflowWrapper(mlflow.pyfunc.PythonModel):
         """
         All = np.load('data/features_df.npy')
         rider_idxs = np.where(All[:, 1] == race_id)[0]
-        if len(rider_idxs) == 0:
-            return {'top_riders': [], 'top_scores': []}
-        Y_pred, _, _, _ = self.model.predict_ranking_for_race(rider_idxs.tolist(), All)
-        sorted_idxs = np.argsort(Y_pred.ranking)[::-1][:25]
-        top_riders = All[rider_idxs[sorted_idxs], 0]
-        top_scores = np.array(Y_pred.scores)[sorted_idxs]
-        return {'top_riders': top_riders.tolist(), 'top_scores': top_scores.tolist()}
+        rider_names = All[rider_idxs, 0]
+        
+        # if len(rider_idxs) == 0:
+        #     return {'riders': [], 'scores': []}
+        
+        Y_pred_scores = self.model.predict_ranking_for_race(rider_idxs.tolist(), All)
+
+        return {'riders': rider_names, 'scores': Y_pred_scores.tolist()}
 
 
 def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
@@ -652,7 +412,7 @@ def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.nda
     split_idx = int((1 - test_ratio) * All.height)
     return All[:split_idx].to_numpy(), All[split_idx:].to_numpy()
 
-def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6) -> np.ndarray:
+def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank = -1) -> np.ndarray:
     """
     Selects random riders from a race, balancing top and bottom performers.
 
@@ -664,6 +424,13 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6) -> np.ndar
     Returns:
         Array of selected rider indices.
     """
+    if min_rank != -1:
+        top_rider_idxs = np.where(
+            (All[:,1] == race_id) & (All[:, 8] <= min_rank)
+        )[0]
+        n = min(min_nr, len(top_rider_idxs))
+        return np.random.choice(top_rider_idxs, size=n, replace=False)
+
     top_rider_idxs = np.where(
         (All[:,1] == race_id) & (All[:, 8] <= 25)
     )[0] #top 25 results
@@ -685,29 +452,41 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
         X: Training subset.
         spline_model: Model instance to train.
     """
-    print("training_model")
-    nr_riders_per_race = 20
-    epochs = 100
+    nr_riders_per_race = 4
+    epochs = 500
     total_loss = 0
+
+    feat_1 = torch.from_numpy(All[:, 9].astype(float))
+    feat_2 = torch.from_numpy(All[:, 12].astype(float))
+    for f in (feat_1, feat_2):
+        print(f.min(), f.max())
+        print(torch.isnan(f).any(), torch.isinf(f).any())
+
+
     for epoch in range(epochs):
-        random_race_id = np.random.choice(X[:,1]) #take id out of X
+        random_race_id = np.random.choice(X[:,1])
         random_rider_idxs = get_random_riders(All, random_race_id, nr_riders_per_race)
 
         if len(random_rider_idxs) < nr_riders_per_race:
+            print(f"not enough riders in this race, continued")
             continue
-            print(f"continued")
 
         Y_true_ranking = All[random_rider_idxs, 8]
-        errors = spline_model.training_step(
+        loss = spline_model.training_step(
             Y_true_ranking = Y_true_ranking, 
             indices = random_rider_idxs, 
             data = All
         )
-        total_loss += sum([abs(error) for error in errors])
+        total_loss += loss
 
         if epoch % (epochs/10) == 0:
             print(f"Epoch {epoch}, Loss: {total_loss}")
             total_loss = 0
+
+            # for f in spline_model.feature_functions:
+            #     for name, param in f.net.named_parameters():
+            #         if param.grad is not None:
+            #             print(name, param.grad.abs().mean().item())
 
 
 def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD) -> Dict[str, float]:
@@ -722,45 +501,69 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD)
     Returns:
         Dict of performance metrics (MSE, MAE, R2).
     """
-    test_size = 50
     race_ids = np.unique(Y[:, 1])
+    test_size = len(race_ids)
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
 
-    all_Y_true_buckets = []
-    all_Y_pred_buckets = []
-    
-    nr_riders_per_race = 10
+    nr_riders_per_race = 4
 
+    from scipy.stats import spearmanr
+    from scipy.stats import kendalltau
+    import itertools
+    import statistics
+
+    def ranking_accuracy(scores: torch.Tensor, correct_order: list[int]) -> float:
+        # 1 -> perfect order
+        # 0.5 -> random order
+        # 0 -> completely reversed
+        true_ranks = {idx: rank for rank, idx in enumerate(correct_order)}
+
+        total_pairs = 0
+        correct_pairs = 0
+
+        for i, j in itertools.combinations(range(len(scores)), 2):
+            total_pairs += 1
+            # Compare ground truth order
+            gt = true_ranks[i] < true_ranks[j]
+            # Compare model scores
+            pred = scores[i] > scores[j]
+            if gt == pred:
+                correct_pairs += 1
+
+        return correct_pairs / total_pairs
+
+    def spearman_correlation(scores, correct_order):
+        predicted_order = torch.argsort(scores, descending=True).tolist()
+        return spearmanr(predicted_order, correct_order).correlation
+
+    def kendall_tau(scores, correct_order):
+        predicted_order = torch.argsort(scores, descending=True).tolist()
+        return kendalltau(predicted_order, correct_order).correlation
+
+    ra = []
+    sc = []
+    kt = []
     for test_race in test_race_ids:
         random_rider_idxs = get_random_riders(All, test_race, nr_riders_per_race)
 
         if len(random_rider_idxs) < nr_riders_per_race:
             continue
 
-        race_pred = []
-
         Y_true_ranking = All[random_rider_idxs, 8]
-        Y_true = Y.from_ranking(Y_true_ranking)
-        Y_pred, neighbor_idxs_s, neighbor_scores_s, neighbor_distances_s = model.predict_ranking_for_race(
-            Y_true_ranking = 
-            random_rider_idxs
+        Y_true_order = np.argsort(np.argsort(Y_true_ranking))
+        Y_pred_scores = model.predict_ranking_for_race(
+            indices = random_rider_idxs,
+            data = All
         )
-        bucket_errors = Y_pred.calculate_errors(Y_true)
-        all_Y_true_buckets.extend(Y_true.buckets)
-        all_Y_pred_buckets.extend(Y_pred.buckets)
+        ra.append(ranking_accuracy(Y_pred_scores, Y_true_order))
+        # sc.append(spearman_correlation(Y_pred_scores, Y_true_order))
+        # kt.append(kendall_tau(Y_pred_scores, Y_true_order))
 
 
-    mse = mean_squared_error(all_Y_true_buckets, all_Y_pred_buckets)
-    mae = mean_absolute_error(all_Y_true_buckets, all_Y_pred_buckets)
-    r2  = r2_score(all_Y_true_buckets, all_Y_pred_buckets)
-
-    print(model.distance_weights)
-    model.plot_learned_splines()
-    return {
-        "MSE": mse,
-        "MAE": mae,
-        "R2": r2
-    }
+    print("Pairwise accuracy:", statistics.mean(ra))
+    # print("Spearman:", statistics.mean(sc))
+    # print("Kendall tau:", statistics.mean(kt))
+    return {"Pairwise accuracy:": statistics.mean(ra)}
 
 
 def main() -> None:
@@ -768,28 +571,42 @@ def main() -> None:
 
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     All = np.concatenate(X_Y)
-    spline_model = SplinesSGD(All)
+    neural_net = SplinesSGD(All)
 
     with mlflow.start_run():
-        mlflow.log_param("lr", Spline.lr)
-        mlflow.log_param("lr_distance", spline_model.lr_distance)
+        # mlflow.log_param("lr", Spline.lr)
+        mlflow.log_param("lr_distance", neural_net.lr_distance)
         mlflow.log_param("epochs", 1000)
         mlflow.log_param("n_splines", 15)
 
-        train_model(All, X_Y[0], spline_model)
+        train_model(All, X_Y[0], neural_net)
 
-        model_perf_dict = compute_model_performance(All, X_Y[1], model=spline_model)
+        model_perf_dict = compute_model_performance(All, X_Y[1], model=neural_net)
         for key, value in model_perf_dict.items():
             mlflow.log_metric(key, value)
 
         # Log the model
         mlflow.pyfunc.log_model(
             "model",
-            python_model=MLflowWrapper(spline_model),
-            registered_model_name="SplinesSGD"
+            python_model=MLflowWrapper(neural_net),
+            registered_model_name="NeuralNetGoesBrrrr"
         )
 
     print("Model performance on test set:", model_perf_dict)
+
+
+    random_race_id = race_result_features.select(pl.col("race_id").unique()).sample(1).row(0)[0]
+    rider_idxs = get_random_riders(All, random_race_id, 10, min_rank = 10)
+    rider_names = All[rider_idxs, 0]
+    
+    Y_true_ranking = All[rider_idxs, 8]
+    Y_pred_scores = neural_net.predict_ranking_for_race(
+        rider_idxs,
+        All,
+    )
+    print({'riders': rider_names, 'scores': Y_pred_scores})
+
+
     
 def predict_top25_for_race(race_id: Any) -> Dict[str, Any]:
     """
@@ -813,22 +630,107 @@ def main2():
 
 
 if __name__ == "__main__":
+    torch.autograd.set_detect_anomaly(True)
     main()
     # main2()
+    # race_result_features = pl.read_parquet("data/features_df.parquet")
 
-# Quick decision flow (what to try, in order)
-
-# Baseline: simple model (logistic/regression) with minimal transforms + proper CV.
-
-# Try GBDT (LightGBM/XGBoost/CatBoost) with basic hyperparameter tuning — often wins on small data with nonlinearities.
-
-# If you need interpretability of specific nonlinear effects, try GAM or spline + Ridge.
-
-# Use ensemble of GAM + GBDT if you need better predictive power and can afford complexity.
-
-
+    # X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
+    # All = np.concatenate(X_Y)
+    # spline_model = SplinesSGD(All)
 
 
 #Training preidicting high results is more important:
 # sklearn estimators usually accept sample_weight in .fit(X,y, sample_weight=...)
+
+
+# class Y():
+#     """holds the predictions for one race"""
+#     def __init__(self, ranking = None, scores = None, order = []):
+#         self.ranking: np.array = ranking
+#         self.order: np.array = np.argsort(np.argsort(self.ranking))
+#         if ranking is None and scores is None:
+#             raise AssertionError("not both scores and ranking can be None")
+        
+#         self.ranking = ranking
+#         self.scores: torch.tensor = scores
+
+#     possible_buckets = [
+#         [1, 3],
+#         [4, 8],
+#         [9, 15],
+#         [16, 25],
+#         [26, 99999]
+#     ]
+#     def ranks_to_buckets(self) -> np.ndarray:
+#         """
+#         Converts ranking positions to bucket categories.
+
+#         Args:
+#             ranks: Array of ranking positions.
+
+#         Returns:
+#             Array of bucket indices.
+#         """
+#         buckets = []
+#         for r in self.ranking:
+#             for i, b in enumerate(self.possible_buckets):
+#                 if r >= b[0] and r <= b[1]:
+#                     buckets.append(i)
+#                     break
+#         assert len(self.ranking) == len(buckets), f"error in mapping ranks to buckets: {self.ranking} -> {buckets}"
+#         return np.array(buckets)
+    
+#     def complete_pred_with_true(self, Y_true = None):
+#         if (self.ranking is None and Y_true is None) or \
+#             (self.ranking is None and Y_true.ranking is None) or \
+#             (self.ranking is not None and Y_true is not None):
+#             raise AssertionError("either self should have a ranking, XOR Y_true should be given with ranking")
+#         if self.ranking is None:
+#             self.ranking = [
+#                 Y_true.ranking[np.where(Y_true.order == order_to_find)[0]][0]
+#                 for order_to_find in self.order
+#             ]
+#             self.buckets: np.array = self.ranks_to_buckets()
+#         else:
+#             self.buckets: np.array = self.ranks_to_buckets()
+#             raise AssertionError("Already a ranking present")
+
+#     @classmethod
+#     def from_ranking(cls, ranking: np.array):
+#         return cls(
+#             ranking=ranking,
+#             scores=None,
+#             order=np.argsort(np.argsort(ranking))
+#         )
+        
+#     @classmethod
+#     def from_scores(cls, scores: torch.tensor):
+#         return cls(
+#             ranking = None,
+#             scores = scores,
+#             order = np.argsort(np.argsort( -1 * np.array(scores)))
+#         )
+    
+#     def calculate_errors(self, Y_true) -> np.ndarray:
+#         """
+#         self: predicted Y
+#         Y_true: actual Y
+
+#         returns:
+#         an error value for each rider, in the same order as y_pred
+
+#         current error: nr of buckets to high or to low
+
+#         # e.g. pred order = 26, true order = 1 -> 
+#         #   pred_buckets = 6 and true_bucket = 1, error = -5, should predict lower score
+#         #    
+#         # e.g. -2 -> predicted order was 2 and true order was 4 -> should predict lower
+#         # e.g. 6 -> predicited order was 8 and true order was 2 -> should predict higher
+#         """
+#         if self.buckets is None:
+#             self.complete_pred_with_true(Y_true)
+
+#         errors = Y_true.buckets - self.buckets
+#         return errors
 

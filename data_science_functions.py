@@ -18,7 +18,7 @@ condition_similarity_cols = [
     # "avg_speed_kmh", 
     "startlist_score",
     "profile_score",
-    "profile_score_last_25k"
+    "profile_score_last_25k",
 ]
 
 def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalized_races_df: pl.DataFrame, k = 5) -> pl.DataFrame:
@@ -359,7 +359,12 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
         .when(pl.col("rank") <= 50).then(5)
         .otherwise(6)
         .alias("rank_bucket")
+    ).with_columns(
+        (
+            (pl.col("rank") / pl.col("rank").max().over("race_id")) 
+        ).alias("rank_norm")
     )
+
 
     # rider_results_and_weights.with_columns([
     #     pl.when(pl.col("rank") <= 3)
@@ -494,7 +499,7 @@ def check_features_stats():
     print(races_per_classification)
 
 if __name__ == "__main__":
-    # main()
+    main()
     # check_results_df()
     # check_races_df()
-    check_features_stats()
+    # check_features_stats()
