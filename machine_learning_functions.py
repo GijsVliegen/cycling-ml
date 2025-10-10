@@ -159,11 +159,14 @@ class RaceModel:
                 lr = 0.01,
                 nr_of_features=1,
                 correlated=False
-            ) for feature_idx in self.feature_idxs
+            )
+            for feature_idx in self.feature_idxs
         ]
+        # self.feature_functions = [torch.compile(f) for f in self.feature_functions]
         self.neighbor_aggregate_function = WeightedNeighbourAggregator(
             nr_of_features=len(self.race_dist_idxs)
         )
+
     
     def _init_feature_funcs(self, X: np.ndarray) -> Dict[int, Callable]:
         """
@@ -209,28 +212,36 @@ class RaceModel:
 
         # self.grad_descend_pass(bucket_errors, Y_pred, Y_true, neighbor_feature_scores_3d)
     
-    def _pairwise_preference_loss(self, score_preferred, score_rejected):
+    def _pairwise_preference_loss(self, score_preferred: torch.tensor, score_rejected: torch.tensor):
         """a pairwise logistic loss (aka Bradley-Terry or ranking loss)"""
         # print(f"{score_preferred:.3e}, {score_rejected:.3e}")
-        return -F.logsigmoid(score_preferred - score_rejected).mean()
+        return -F.logsigmoid(score_preferred - score_rejected)
+
+    def _get_pairs(self, correct_order):
+        """According to chatgpt very fast"""
+        N = len(correct_order)
+        num_pairs = N * (N - 1) // 2
+
+        # Preallocate arrays
+        first_elements = np.empty(num_pairs, dtype=np.int32)
+        second_elements = np.empty(num_pairs, dtype=np.int32)
+
+        idx = 0
+        for i in range(N):
+            length = N - i - 1
+            first_elements[idx:idx+length] = correct_order[i]
+            second_elements[idx:idx+length] = correct_order[i+1:]
+            idx += length
+
+        return first_elements, second_elements
+
 
     def _list_preference_loss(self, scores, correct_order):
-        pairs = [
-            (i, j) 
-            for idx, i in enumerate(correct_order)
-            for j in correct_order[idx + 1:]
-        ]
-        losses = torch.vstack([
-            self._pairwise_preference_loss(
-                score_preferred = scores[pair[0]],
-                score_rejected = scores[pair[1]]
-            )
-            for pair in pairs
-        ])
-        #TODO: vectorize
-        
+        preferred_idxs, rejected_idxs = self._get_pairs(correct_order)
+        preferred_scores = scores[preferred_idxs]
+        rejected_scores = scores[rejected_idxs]
+        losses = self._pairwise_preference_loss(preferred_scores, rejected_scores)
         return torch.sum(losses)
-        #TODO: gather losses into one value
 
     def _step(self):
         
@@ -251,30 +262,42 @@ class RaceModel:
             f.zero_grad()
         self.neighbor_aggregate_function.zero_grad()
 
-    def _get_closest_points(self, X: np.ndarray, rider_idx: int, k: int) -> List[int]:
+    def _get_closest_points_batch(self, X: np.ndarray, rider_idxs: List[int], k: int) -> List[List[int]]:
         """
-        Finds k historical data points for the same rider in different races, prioritized by best ranks.
+        Finds k historical data points for multiple riders in different races, prioritized by best ranks.
 
         Args:
             X: Full dataset.
-            y: Current data point.
-            k: Number of neighbors to return.
+            rider_idxs: List of rider indices.
+            k: Number of neighbors to return per rider.
 
         Returns:
-            List of indices of similar historical points, top k by rank.
+            List of lists of indices of similar historical points, top k by rank per rider.
         """
-        neighbor_idxs = [
-            i
-            for i, data_point in enumerate(X)
-            if (
-                data_point[0] == X[rider_idx][0] and #same name
-                data_point[1] != X[rider_idx][1] and      #different race id
-                data_point[6] <= X[rider_idx][6]  #same or earlier year
-            )
-        ]
-        # Sort neighbors by rank (index 8, lower is better) and take top k
-        neighbor_idxs_sorted = sorted(neighbor_idxs, key=lambda i: X[i, 8])
-        return neighbor_idxs_sorted[:k]
+        rider_data = X[rider_idxs]  # [n_riders, n_features]
+        n_riders = len(rider_idxs)
+        n_data = X.shape[0]
+
+        # Vectorized masking using broadcasting
+        mask = (
+            (rider_data[:, None, 0] == X[None, :, 0]) &  # same name
+            (rider_data[:, None, 1] != X[None, :, 1]) &  # different race
+            (X[None, :, 6] <= rider_data[:, None, 6])   # earlier or same year
+        )
+
+        neighbor_lists = []
+        for rider_i in range(n_riders):
+            indices = np.where(mask[rider_i])[0]
+            if len(indices) == 0:
+                neighbor_lists.append([])
+                continue
+            # Sort by rank (ascending, lower is better)
+            # ranks = X[indices, 8]
+            # sorted_order = np.argsort(ranks)
+            # top_indices = indices[sorted_order][:k]
+            # neighbor_lists.append(top_indices.tolist())
+            neighbor_lists.append(indices)
+        return neighbor_lists
 
     def predict_ranking_for_race(
         self, 
@@ -288,26 +311,17 @@ class RaceModel:
         Args:
             indices: Indices of riders to predict.
             data: Full dataset.
+            torch_data: Torch tensor of dataset.
 
         Returns:
-            Tuple of predictions, 
-            3D neighbor feature scores (len(indices) x n_features x k),
-            list of neighbor indices,
-            list of neighbor distances
+            List of predicted scores for each rider.
         """
-        Y_pred_scores = []
-        for index in indices:
-
-            rider_score = self.forward_rider(
-                all_data = data,
-                torch_data = torch_data, 
-                rider_idx = index,
-                nr_neighbors=25
-            )
-
-            Y_pred_scores.append(rider_score)
-
-        # Y_pred = Y.from_scores(Y_pred_scores)
+        Y_pred_scores = self.forward_riders(
+            all_data=data,
+            torch_data=torch_data,
+            rider_idxs=indices,
+            nr_neighbors=25
+        )
         return Y_pred_scores
 
     def training_step(
@@ -350,42 +364,35 @@ class RaceModel:
 
         return loss
 
-    
-    def forward_rider(self,
+    def forward_riders(self,
         all_data: np.ndarray,
         torch_data: torch.tensor,
-        rider_idx: int,#np.ndarray,
+        rider_idxs: List[int],
         nr_neighbors: int = 25,
-    ) -> torch.tensor:
+    ) -> List[torch.tensor]:
+        #TODO: return one tensor
         """
-        Computes feature scores for k-nearest neighbors of a rider in a race.
+        Computes feature scores for k-nearest neighbors of multiple riders in a race.
 
         Args:
             all_data: Full dataset.
-            x: Current data point.
-            k: Number of neighbors to base calculation on.
+            torch_data: Torch tensor of dataset.
+            rider_idxs: List of rider indices.
+            nr_neighbors: Number of neighbors per rider.
 
         Returns:
-            np.ndarray: Array with each row containing the feature scores for a neighbor (shape: n_features x k).
+            List of rider scores.
         """
-        # neighbor_idxs = self.get_closest_points(data, data[index], k=25)
-
-        #TODO: multiply distance of neighbor with score
-
-        neighbor_idxs = self.get_closest_points(
-            X = all_data,
-            rider_idx = rider_idx,
-            k = nr_neighbors
+        neighbor_lists = self._get_closest_points_batch(
+            X=all_data,
+            rider_idxs=rider_idxs,
+            k=nr_neighbors
         )
-        
-        if len(neighbor_idxs) == 0:
-            return torch.tensor(-10)
+        all_neighbor_idxs = [idx for sublist in neighbor_lists for idx in sublist]
+        rider_neighbor_counts = [len(sublist) for sublist in neighbor_lists]
 
-        # neighbor_data = data[neighbor_idxs]
-        # diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
-        # neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
-        neighbor_data = torch_data[neighbor_idxs]
+        neighbor_data = torch_data[all_neighbor_idxs]
 
         neighbor_scores: torch.tensor = torch.prod(
             torch.stack([
@@ -396,28 +403,30 @@ class RaceModel:
                     self.feature_idxs,
                     self.feature_functions
                 )
-                # for i, f in enumerate(self.feature_functions)
             ]),
-            dim = 0
+            dim=0
         ).squeeze(-1)
         if torch.isnan(neighbor_scores).any() or torch.isinf(neighbor_scores).any() or neighbor_scores.numel() == 0:
             print("debug here")
             print(neighbor_scores)
-        #TODO: aggregate with prod or with sum???
 
-        # epsilon = 0.01
-        # weights = 1 / (neighbor_distances + epsilon)
-        # weights = torch.from_numpy(weights).float()
-        # rider_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
-        
-        
-        center_race_features = torch_data[rider_idx][self.race_dist_idxs]
-        neighbor_race_features = torch_data[neighbor_idxs][:, self.race_dist_idxs]
-        rider_score = self.neighbor_aggregate_function.forward(
-            center_race_features, neighbor_race_features, neighbor_scores
-        )
+        rider_scores = []
+        offset = 0
+        for i, rider_idx in enumerate(rider_idxs):
+            count = rider_neighbor_counts[i]
+            if count == 0:
+                rider_scores.append(torch.tensor(-10.0))
+            else:
+                neigh_scores = neighbor_scores[offset:offset + count]
+                center_race_features = torch_data[rider_idx][self.race_dist_idxs]
+                neighbor_race_features = torch_data[all_neighbor_idxs[offset:offset + count]][:, self.race_dist_idxs]
+                rider_score = self.neighbor_aggregate_function.forward(
+                    center_race_features, neighbor_race_features, neigh_scores
+                )
+                rider_scores.append(rider_score)
+            offset += count
 
-        return rider_score
+        return rider_scores
 
     def plot_parameters(self) -> None:
         self.neighbor_aggregate_function.plot_weights()
