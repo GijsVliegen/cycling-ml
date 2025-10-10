@@ -19,6 +19,7 @@ class WeightedNeighbourAggregator(nn.Module):
     def __init__(self, nr_of_features: int):
         super().__init__()
         self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
+        self.optimizer = optim.Adam(self.parameters(), lr=0.01)
 
     def forward(self, center_features, neighbor_features, neighbor_scores):
         """
@@ -38,6 +39,16 @@ class WeightedNeighbourAggregator(nn.Module):
         aggregated_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
 
         return aggregated_score
+    
+    def step(self):
+        torch.nn.functional.softplus(self.feature_weights)
+        self.optimizer.step()
+
+    def zero_grad(self):
+        self.optimizer.zero_grad()
+
+    def plot_weights(self):
+        print(f"feature weights: {self.feature_weights}")
     
 
 class NeuralNet(nn.Module):
@@ -75,7 +86,7 @@ class NeuralNet(nn.Module):
             )
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         # self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.001)
-        self.criterion = nn.MarginRankingLoss(margin=1.0)
+        # self.criterion = nn.MarginRankingLoss(margin=1.0)
 
         self.separate_inputs = nr_of_features > 2 and not correlated
 
@@ -104,7 +115,7 @@ class NeuralNet(nn.Module):
 
 
     
-class SplinesSGD:
+class RaceModel:
     """
     Stochastic Gradient Descent model using splines for nonlinear feature transformations.
 
@@ -116,7 +127,7 @@ class SplinesSGD:
 
     def __init__(self, X: np.ndarray) -> None:
         """
-        Initializes the SplinesSGD model.
+        Initializes the RaceModel model.
 
         Args:
             X: Training data array (n_samples, n_features).
@@ -126,8 +137,8 @@ class SplinesSGD:
         # 10-11: age | rank_bucket | rank_normalized
 
         self.init_feature_funcs = self._init_feature_funcs(X)
-        self.feature_idxs = [9, 12]
-        self.feature_names = ["startlist_score", "rank_normalized"]
+        self.feature_idxs = [9, 10, 12]
+        self.feature_names = ["startlist_score", "age", "rank_normalized"]
         self.race_dist_idxs = [3, 4, 5]#, 6]
         self.race_dist_metrics = [
             # "distance_km",
@@ -144,12 +155,15 @@ class SplinesSGD:
 
         self.feature_functions: list[NeuralNet] = [
             NeuralNet(
-                init_func = self.init_feature_funcs[feature_idx],
+                init_func = self.init_feature_funcs.get(feature_idx, lambda x:1),
                 lr = 0.01,
                 nr_of_features=1,
                 correlated=False
             ) for feature_idx in self.feature_idxs
         ]
+        self.neighbor_aggregate_function = WeightedNeighbourAggregator(
+            nr_of_features=len(self.race_dist_idxs)
+        )
     
     def _init_feature_funcs(self, X: np.ndarray) -> Dict[int, Callable]:
         """
@@ -321,10 +335,12 @@ class SplinesSGD:
 
         for f in self.feature_functions:
             f.step()
+        self.neighbor_aggregate_function.step()
 
     def _zero_grad(self):
         for f in self.feature_functions:
             f.zero_grad()
+        self.neighbor_aggregate_function.zero_grad()
 
     def forward_rider(self,
         all_data: np.ndarray,
@@ -356,8 +372,8 @@ class SplinesSGD:
             return torch.tensor(-10)
 
         # neighbor_data = data[neighbor_idxs]
-        diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
-        neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
+        # diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
+        # neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
         neighbor_feature_vals = all_data[neighbor_idxs]
 
@@ -376,29 +392,34 @@ class SplinesSGD:
         if torch.isnan(neighbor_scores).any() or torch.isinf(neighbor_scores).any() or neighbor_scores.numel() == 0:
             print("debug here")
             print(neighbor_scores)
-        # print(f"highest score = {neighbor_scores.max():.3e}, lowest score = {neighbor_scores.min():.3e}")
         #TODO: aggregate with prod or with sum???
 
-        epsilon = 0.01
-        weights = 1 / (neighbor_distances + epsilon)
-        weights = torch.from_numpy(weights).float()
-        rider_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
+        # epsilon = 0.01
+        # weights = 1 / (neighbor_distances + epsilon)
+        # weights = torch.from_numpy(weights).float()
+        # rider_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
         
-        #TODO: add distance weights
+        
+        center_features = torch.from_numpy(rider[self.race_dist_idxs].astype(float)).float()
+        neighbor_features = torch.from_numpy(all_data[neighbor_idxs][:, self.race_dist_idxs].astype(float)).float()
+        rider_score = self.neighbor_aggregate_function.forward(
+            center_features, neighbor_features, neighbor_scores
+        )
 
         return rider_score
 
-    def plot_learned_functions(self) -> None:
+    def plot_parameters(self) -> None:
+        self.neighbor_aggregate_function.plot_weights()
         for f in self.feature_functions:
             f.plot_learned_function()
             
 
 class MLflowWrapper(mlflow.pyfunc.PythonModel):
     """
-    MLflow wrapper for SplinesSGD model to enable logging and loading.
+    MLflow wrapper for RaceModel model to enable logging and loading.
     """
 
-    def __init__(self, model: SplinesSGD):
+    def __init__(self, model: RaceModel):
         self.model = model
 
     def predict(self, context, race_id: int) -> Dict[str, Any]:
@@ -469,7 +490,7 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank =
         np.random.choice(bottom_rider_idxs, size=int(n/2), replace=False)
     ))
 
-def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> None:
+def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet) -> None:
     """
     Trains the spline model using stochastic gradient descent.
 
@@ -479,7 +500,7 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
         spline_model: Model instance to train.
     """
     nr_riders_per_race = 4
-    epochs = 5000
+    epochs = 500
     total_loss = 0
 
     feat_1 = torch.from_numpy(All[:, 9].astype(float))
@@ -498,7 +519,7 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
             continue
 
         Y_true_ranking = All[random_rider_idxs, 8]
-        loss = spline_model.training_step(
+        loss = model.training_step(
             Y_true_ranking = Y_true_ranking, 
             indices = random_rider_idxs, 
             data = All
@@ -506,7 +527,9 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
         total_loss += loss
 
         if epoch % (epochs/10) == 0:
+
             print(f"Epoch {epoch}, Loss: {total_loss}")
+            model.plot_parameters()
             total_loss = 0
 
             # for f in spline_model.feature_functions:
@@ -515,7 +538,7 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
             #             print(name, param.grad.abs().mean().item())
 
 
-def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD) -> Dict[str, float]:
+def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel) -> Dict[str, float]:
     """
     Evaluates model performance on test races.
 
@@ -531,7 +554,7 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD)
     test_size = len(race_ids)
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
 
-    nr_riders_per_race = 4
+    nr_riders_per_race = 100
 
     from scipy.stats import spearmanr
     from scipy.stats import kendalltau
@@ -572,8 +595,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD)
     for test_race in test_race_ids:
         random_rider_idxs = get_random_riders(All, test_race, nr_riders_per_race)
 
-        if len(random_rider_idxs) < nr_riders_per_race:
-            continue
+        # if len(random_rider_idxs) < nr_riders_per_race:
+        #     continue
 
         Y_true_ranking = All[random_rider_idxs, 8]
         Y_true_order = np.argsort(np.argsort(Y_true_ranking))
@@ -591,13 +614,12 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: SplinesSGD)
     # print("Kendall tau:", statistics.mean(kt))
     return {"Pairwise accuracy:": statistics.mean(ra)}
 
-
 def main() -> None:
     race_result_features = pl.read_parquet("data/features_df.parquet")
 
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     All = np.concatenate(X_Y)
-    neural_net = SplinesSGD(All)
+    neural_net = RaceModel(All)
 
     with mlflow.start_run():
         # mlflow.log_param("lr", Spline.lr)
@@ -630,7 +652,9 @@ def main() -> None:
         rider_idxs,
         All,
     )
-    print({'riders': rider_names, 'scores': Y_pred_scores})
+    pprint.pprint({'riders': rider_names.tolist()})
+    pprint.pprint({'scores': torch.stack(Y_pred_scores).tolist()})
+    pprint.pprint({'real ranking': Y_true_ranking.tolist()})
 
 
     
@@ -644,8 +668,8 @@ def predict_top25_for_race(race_id: Any) -> Dict[str, Any]:
     Returns:
         Dict with 'top_riders' and 'top_scores'.
     """
-    # Load the model; adjust the URI as needed (e.g., "models:/SplinesSGD/Production")
-    model = mlflow.pyfunc.load_model("models:/SplinesSGD/None")
+    # Load the model; adjust the URI as needed (e.g., "models:/RaceModel/Production")
+    model = mlflow.pyfunc.load_model("models:/RaceModel/None")
     return model.predict({'race_id': race_id})
 
 def main2():
@@ -663,7 +687,7 @@ if __name__ == "__main__":
 
     # X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     # All = np.concatenate(X_Y)
-    # spline_model = SplinesSGD(All)
+    # spline_model = RaceModel(All)
 
 
 #Training preidicting high results is more important:
