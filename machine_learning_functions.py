@@ -314,7 +314,7 @@ class RaceModel:
             torch_data: Torch tensor of dataset.
 
         Returns:
-            List of predicted scores for each rider.
+            Tensor of predicted scores for each rider.
         """
         Y_pred_scores = self.forward_riders(
             all_data=data,
@@ -369,7 +369,7 @@ class RaceModel:
         torch_data: torch.tensor,
         rider_idxs: List[int],
         nr_neighbors: int = 25,
-    ) -> List[torch.tensor]:
+    ) -> torch.tensor:
         #TODO: return one tensor
         """
         Computes feature scores for k-nearest neighbors of multiple riders in a race.
@@ -381,7 +381,7 @@ class RaceModel:
             nr_neighbors: Number of neighbors per rider.
 
         Returns:
-            List of rider scores.
+            Tensor of rider scores.
         """
         neighbor_lists = self._get_closest_points_batch(
             X=all_data,
@@ -406,9 +406,6 @@ class RaceModel:
             ]),
             dim=0
         ).squeeze(-1)
-        if torch.isnan(neighbor_scores).any() or torch.isinf(neighbor_scores).any() or neighbor_scores.numel() == 0:
-            print("debug here")
-            print(neighbor_scores)
 
         rider_scores = []
         offset = 0
@@ -426,7 +423,7 @@ class RaceModel:
                 rider_scores.append(rider_score)
             offset += count
 
-        return rider_scores
+        return torch.stack(rider_scores)
 
     def plot_parameters(self) -> None:
         self.neighbor_aggregate_function.plot_weights()
@@ -695,7 +692,7 @@ def main() -> None:
         torch_data=torch_data
     )
     pprint.pprint({'riders': rider_names.tolist()})
-    pprint.pprint({'scores': torch.stack(Y_pred_scores).tolist()})
+    pprint.pprint({'scores': Y_pred_scores.tolist()})
     pprint.pprint({'real ranking': Y_true_ranking.tolist()})
 
 
