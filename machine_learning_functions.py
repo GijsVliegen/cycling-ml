@@ -209,97 +209,6 @@ class RaceModel:
 
         # self.grad_descend_pass(bucket_errors, Y_pred, Y_true, neighbor_feature_scores_3d)
     
-    def get_closest_points(self, X: np.ndarray, y: np.ndarray, k: int) -> List[int]:
-        """
-        Finds k historical data points for the same rider in different races, prioritized by best ranks.
-
-        Args:
-            X: Full dataset.
-            y: Current data point.
-            k: Number of neighbors to return.
-
-        Returns:
-            List of indices of similar historical points, top k by rank.
-        """
-        neighbors = [
-            i
-            for i, data_point in enumerate(X)
-            if (
-                data_point[0] == y[0] and #same name
-                data_point[1] != y[1] and      #different race id
-                data_point[6] <= y[6]  #same or earlier year
-            )
-        ]
-        # Sort neighbors by rank (index 8, lower is better) and take top k
-        neighbors_sorted = sorted(neighbors, key=lambda i: X[i, 8])
-        return neighbors_sorted[:k]
-
-
-    def predict_ranking_for_race(
-        self, 
-        indices: List[int], 
-        data: np.ndarray
-    ) -> torch.tensor:
-        """
-        Predicts scores for multiple riders in a race.
-
-        Args:
-            indices: Indices of riders to predict.
-            data: Full dataset.
-
-        Returns:
-            Tuple of predictions, 
-            3D neighbor feature scores (len(indices) x n_features x k),
-            list of neighbor indices,
-            list of neighbor distances
-        """
-        Y_pred_scores = []
-        for index in indices:
-
-            rider_score = self.forward_rider(
-                data, 
-                rider = data[index],
-                nr_neighbors=25
-            )
-
-            Y_pred_scores.append(rider_score)
-
-        # Y_pred = Y.from_scores(Y_pred_scores)
-        return Y_pred_scores
-
-    def training_step(self, Y_true_ranking: np.ndarray, indices: List[int], data: np.ndarray) -> np.ndarray:
-        """
-        Performs one training step: predict, compute errors, and update weights.
-
-        Args:
-            Y_true: True rankings.
-            indices: Rider indices.
-            data: Full dataset.
-
-        Returns:
-            Array of errors for each rider.
-        """
-        self._zero_grad()
-        # Y_true = Y.from_ranking(Y_true_ranking)
-        Y_true_order = np.argsort(np.argsort(Y_true_ranking))
-        Y_pred_scores = self.predict_ranking_for_race(
-            indices,
-            data
-        )
-        loss = self._list_preference_loss(Y_pred_scores, Y_true_order)
-        loss.backward()
-        self._step()
-        # for f in self.feature_functions:
-        #     total_norm = 0
-        #     for p in f.net.parameters():
-        #         if p.grad is not None:
-        #             param_norm = p.grad.data.norm(2)
-        #             total_norm += param_norm.item() ** 2
-        #     print("Grad norm:", total_norm ** 0.5)
-
-
-        return loss
-
     def _pairwise_preference_loss(self, score_preferred, score_rejected):
         """a pairwise logistic loss (aka Bradley-Terry or ranking loss)"""
         # print(f"{score_preferred:.3e}, {score_rejected:.3e}")
@@ -342,9 +251,110 @@ class RaceModel:
             f.zero_grad()
         self.neighbor_aggregate_function.zero_grad()
 
+    def _get_closest_points(self, X: np.ndarray, rider_idx: int, k: int) -> List[int]:
+        """
+        Finds k historical data points for the same rider in different races, prioritized by best ranks.
+
+        Args:
+            X: Full dataset.
+            y: Current data point.
+            k: Number of neighbors to return.
+
+        Returns:
+            List of indices of similar historical points, top k by rank.
+        """
+        neighbor_idxs = [
+            i
+            for i, data_point in enumerate(X)
+            if (
+                data_point[0] == X[rider_idx][0] and #same name
+                data_point[1] != X[rider_idx][1] and      #different race id
+                data_point[6] <= X[rider_idx][6]  #same or earlier year
+            )
+        ]
+        # Sort neighbors by rank (index 8, lower is better) and take top k
+        neighbor_idxs_sorted = sorted(neighbor_idxs, key=lambda i: X[i, 8])
+        return neighbor_idxs_sorted[:k]
+
+    def predict_ranking_for_race(
+        self, 
+        indices: List[int], 
+        data: np.ndarray,
+        torch_data: torch.tensor
+    ) -> torch.tensor:
+        """
+        Predicts scores for multiple riders in a race.
+
+        Args:
+            indices: Indices of riders to predict.
+            data: Full dataset.
+
+        Returns:
+            Tuple of predictions, 
+            3D neighbor feature scores (len(indices) x n_features x k),
+            list of neighbor indices,
+            list of neighbor distances
+        """
+        Y_pred_scores = []
+        for index in indices:
+
+            rider_score = self.forward_rider(
+                all_data = data,
+                torch_data = torch_data, 
+                rider_idx = index,
+                nr_neighbors=25
+            )
+
+            Y_pred_scores.append(rider_score)
+
+        # Y_pred = Y.from_scores(Y_pred_scores)
+        return Y_pred_scores
+
+    def training_step(
+        self, 
+        Y_true_ranking: np.ndarray, 
+        indices: List[int], 
+        data: np.ndarray,
+        torch_data: torch.tensor
+    ) -> np.ndarray:
+        """
+        Performs one training step: predict, compute errors, and update weights.
+
+        Args:
+            Y_true: True rankings.
+            indices: Rider indices.
+            data: Full dataset.
+
+        Returns:
+            Array of errors for each rider.
+        """
+        self._zero_grad()
+        # Y_true = Y.from_ranking(Y_true_ranking)
+        Y_true_order = np.argsort(np.argsort(Y_true_ranking))
+        Y_pred_scores = self.predict_ranking_for_race(
+            indices = indices,
+            data = data,
+            torch_data = torch_data
+        )
+        loss = self._list_preference_loss(Y_pred_scores, Y_true_order)
+        loss.backward()
+        self._step()
+        # for f in self.feature_functions:
+        #     total_norm = 0
+        #     for p in f.net.parameters():
+        #         if p.grad is not None:
+        #             param_norm = p.grad.data.norm(2)
+        #             total_norm += param_norm.item() ** 2
+        #     print("Grad norm:", total_norm ** 0.5)
+
+
+        return loss
+
+    
     def forward_rider(self,
         all_data: np.ndarray,
-        rider: np.ndarray,
+        torch_data: torch.tensor,
+        rider_idx: int,#np.ndarray,
         nr_neighbors: int = 25,
     ) -> torch.tensor:
         """
@@ -364,7 +374,7 @@ class RaceModel:
 
         neighbor_idxs = self.get_closest_points(
             X = all_data,
-            y = rider,
+            rider_idx = rider_idx,
             k = nr_neighbors
         )
         
@@ -375,17 +385,18 @@ class RaceModel:
         # diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
         # neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
 
-        neighbor_feature_vals = all_data[neighbor_idxs]
+        neighbor_data = torch_data[neighbor_idxs]
 
         neighbor_scores: torch.tensor = torch.prod(
             torch.stack([
                 f.forward(
-                    torch.from_numpy(neighbor_feature_vals[:, i : i + 1].astype(float)).float()
+                    neighbor_data[:, i : i + 1]
                 )
                 for i, f in zip(
                     self.feature_idxs,
                     self.feature_functions
                 )
+                # for i, f in enumerate(self.feature_functions)
             ]),
             dim = 0
         ).squeeze(-1)
@@ -400,10 +411,10 @@ class RaceModel:
         # rider_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
         
         
-        center_features = torch.from_numpy(rider[self.race_dist_idxs].astype(float)).float()
-        neighbor_features = torch.from_numpy(all_data[neighbor_idxs][:, self.race_dist_idxs].astype(float)).float()
+        center_race_features = torch_data[rider_idx][self.race_dist_idxs]
+        neighbor_race_features = torch_data[neighbor_idxs][:, self.race_dist_idxs]
         rider_score = self.neighbor_aggregate_function.forward(
-            center_features, neighbor_features, neighbor_scores
+            center_race_features, neighbor_race_features, neighbor_scores
         )
 
         return rider_score
@@ -490,7 +501,7 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank =
         np.random.choice(bottom_rider_idxs, size=int(n/2), replace=False)
     ))
 
-def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet) -> None:
+def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: torch.tensor) -> None:
     """
     Trains the spline model using stochastic gradient descent.
 
@@ -503,11 +514,19 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet) -> None:
     epochs = 500
     total_loss = 0
 
-    feat_1 = torch.from_numpy(All[:, 9].astype(float))
-    feat_2 = torch.from_numpy(All[:, 12].astype(float))
-    for f in (feat_1, feat_2):
-        print(f.min(), f.max())
-        print(torch.isnan(f).any(), torch.isinf(f).any())
+    # torch_data = np.zeros(All.shape, dtype=float)
+    # for j in range(All.shape[1]):
+    #     col = All[:, j]
+    #     try:
+    #         torch_data[:, j] = col.astype(float)#.float()
+    #     except (ValueError, TypeError):
+    #         torch_data[:, j] = 0.0
+    # torch_data = torch.from_numpy(torch_data).float()
+
+
+    # for f in torch_data.T: #iterate over all cols
+    #     print(f.min(), f.max())
+    #     print(torch.isnan(f).any(), torch.isinf(f).any())
 
 
     for epoch in range(epochs):
@@ -522,7 +541,8 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet) -> None:
         loss = model.training_step(
             Y_true_ranking = Y_true_ranking, 
             indices = random_rider_idxs, 
-            data = All
+            data = All,
+            torch_data = torch_data,
         )
         total_loss += loss
 
@@ -538,7 +558,7 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet) -> None:
             #             print(name, param.grad.abs().mean().item())
 
 
-def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel) -> Dict[str, float]:
+def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, torch_data: torch.tensor) -> Dict[str, float]:
     """
     Evaluates model performance on test races.
 
@@ -550,6 +570,7 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel) 
     Returns:
         Dict of performance metrics (MSE, MAE, R2).
     """
+
     race_ids = np.unique(Y[:, 1])
     test_size = len(race_ids)
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
@@ -602,7 +623,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel) 
         Y_true_order = np.argsort(np.argsort(Y_true_ranking))
         Y_pred_scores = model.predict_ranking_for_race(
             indices = random_rider_idxs,
-            data = All
+            data = All,
+            torch_data = torch_data
         )
         ra.append(ranking_accuracy(Y_pred_scores, Y_true_order))
         # sc.append(spearman_correlation(Y_pred_scores, Y_true_order))
@@ -621,15 +643,25 @@ def main() -> None:
     All = np.concatenate(X_Y)
     neural_net = RaceModel(All)
 
+    torch_data = np.zeros(All.shape, dtype=float)
+    for j in range(All.shape[1]):
+        col = All[:, j]
+        try:
+            torch_data[:, j] = col.astype(float)#.float()
+        except (ValueError, TypeError):
+            torch_data[:, j] = 0.0
+    torch_data = torch.from_numpy(torch_data).float()
+
+
     with mlflow.start_run():
         # mlflow.log_param("lr", Spline.lr)
         mlflow.log_param("lr_distance", neural_net.lr_distance)
         mlflow.log_param("epochs", 1000)
         mlflow.log_param("n_splines", 15)
 
-        train_model(All, X_Y[0], neural_net)
+        train_model(All, X_Y[0], neural_net, torch_data=torch_data)
 
-        model_perf_dict = compute_model_performance(All, X_Y[1], model=neural_net)
+        model_perf_dict = compute_model_performance(All, X_Y[1], model=neural_net, torch_data=torch_data)
         for key, value in model_perf_dict.items():
             mlflow.log_metric(key, value)
 
@@ -651,6 +683,7 @@ def main() -> None:
     Y_pred_scores = neural_net.predict_ranking_for_race(
         rider_idxs,
         All,
+        torch_data=torch_data
     )
     pprint.pprint({'riders': rider_names.tolist()})
     pprint.pprint({'scores': torch.stack(Y_pred_scores).tolist()})
