@@ -15,6 +15,30 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+class WeightedNeighbourAggregator(nn.Module):
+    def __init__(self, nr_of_features: int):
+        super().__init__()
+        self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
+
+    def forward(self, center_features, neighbor_features, neighbor_scores):
+        """
+        center_features: [nr_of_features]
+        neighbor_features: [N, nr_of_features]
+        neighbor_scores: [N] 
+        """
+        # Compute distances from center to each neighbor with learnable weights
+        diff = center_features - neighbor_features  # [N, D]
+        weighted_diff = (diff ** 2) * self.feature_weights  # [N, D]
+        dist = torch.sqrt(weighted_diff.sum(dim=-1) + 1e-8)  # [N]
+
+        # Convert distances to weights (Gaussian kernel)
+        weights = torch.exp(-dist)  # [N]
+
+        # Aggregate neighbor scores as weighted average
+        aggregated_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
+
+        return aggregated_score
+    
 
 class NeuralNet(nn.Module):
     """
@@ -104,9 +128,9 @@ class SplinesSGD:
         self.init_feature_funcs = self._init_feature_funcs(X)
         self.feature_idxs = [9, 12]
         self.feature_names = ["startlist_score", "rank_normalized"]
-        self.race_dist_idxs = [2, 3, 4, 5]#, 6]
+        self.race_dist_idxs = [3, 4, 5]#, 6]
         self.race_dist_metrics = [
-            "distance_km",
+            # "distance_km",
             "elevation",
             "profile_score",
             "profile_score_last_25k",
@@ -329,19 +353,19 @@ class SplinesSGD:
         )
         
         if len(neighbor_idxs) == 0:
-            return -10
+            return torch.tensor(-10)
 
         # neighbor_data = data[neighbor_idxs]
         diffs = rider[self.race_dist_idxs] - all_data[neighbor_idxs][:, self.race_dist_idxs]
         neighbor_distances = np.sqrt(np.sum(self.distance_weights * diffs**2, axis=1).astype(float))
-        
+
         neighbor_feature_vals = all_data[neighbor_idxs]
 
         neighbor_scores: torch.tensor = torch.prod(
             torch.stack([
                 f.forward(
                     torch.from_numpy(neighbor_feature_vals[:, i : i + 1].astype(float)).float()
-                ) 
+                )
                 for i, f in zip(
                     self.feature_idxs,
                     self.feature_functions
@@ -355,8 +379,10 @@ class SplinesSGD:
         # print(f"highest score = {neighbor_scores.max():.3e}, lowest score = {neighbor_scores.min():.3e}")
         #TODO: aggregate with prod or with sum???
 
-
-        rider_score = neighbor_scores.mean()
+        epsilon = 0.01
+        weights = 1 / (neighbor_distances + epsilon)
+        weights = torch.from_numpy(weights).float()
+        rider_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
         
         #TODO: add distance weights
 
@@ -453,7 +479,7 @@ def train_model(All: np.ndarray, X: np.ndarray, spline_model: SplinesSGD) -> Non
         spline_model: Model instance to train.
     """
     nr_riders_per_race = 4
-    epochs = 500
+    epochs = 5000
     total_loss = 0
 
     feat_1 = torch.from_numpy(All[:, 9].astype(float))
