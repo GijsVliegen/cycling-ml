@@ -17,7 +17,17 @@ import torch.nn.functional as F
 
 class WeightedNeighbourAggregator(nn.Module):
     def __init__(self, nr_of_features: int):
+
+
+
         super().__init__()
+        self.net = nn.Sequential( #nr_neighbor_aggregator_net
+            nn.Linear(1, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+            nn.Softplus()
+        )
+
         self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
         self.optimizer = optim.Adam(self.parameters(), lr=0.01)
 
@@ -52,6 +62,13 @@ class WeightedNeighbourAggregator(nn.Module):
 
         # Aggregate neighbor scores as weighted average
         aggregated_score = torch.sum(weights * time_weights * neighbor_scores) / torch.sum(weights)
+        if neighbor_scores.numel() == 0:
+            breakpoint()
+        aggregated_score *= self.net(torch.tensor([neighbor_scores.numel()]).float())[0]
+
+
+        #TODO: currently all (top 25) scores are averaged. this means one win in entire career results in high score, but 20 top10s over 3 years, not so.  
+        # -> add penalty
 
         return aggregated_score
     
@@ -62,8 +79,21 @@ class WeightedNeighbourAggregator(nn.Module):
     def zero_grad(self):
         self.optimizer.zero_grad()
 
-    def plot_weights(self):
+    def plot_model(self):
         print(f"feature weights: {self.feature_weights}")
+
+        if hasattr(self, 'net') and self.net[0].in_features == 1:
+            x = torch.linspace(0, 25, 100).unsqueeze(1)
+            with torch.no_grad():
+                y = self.net(x)
+            plt.figure()
+            plt.plot(x.numpy().flatten(), y.numpy().flatten())
+            plt.title(f'Learned Function for nr_of_neighbors')
+            plt.xlabel(f'nr_of_neighbors')
+            plt.ylabel('Output')
+            plt.show()
+        else:
+            print("Plotting not implemented for this configuration")
 
     def normalize_weights(self):
         pass
@@ -81,7 +111,8 @@ class NeuralNet(nn.Module):
             self.net = nn.Sequential(
                 nn.Linear(1, 16),
                 nn.ReLU(),
-                nn.Linear(16, 1)
+                nn.Linear(16, 1),
+                nn.Softplus()
             )
         elif nr_of_features > 1 and not correlated:
             self.feature_input_layers = [
@@ -128,8 +159,19 @@ class NeuralNet(nn.Module):
     def zero_grad(self):
         self.optimizer.zero_grad()
 
-    def plot_learned_function(self):
-        pass
+    def plot_learned_function(self, input):
+        if hasattr(self, 'net') and self.net[0].in_features == 1:
+            x = torch.linspace(0, 1, 100).unsqueeze(1)
+            with torch.no_grad():
+                y = self.net(x)
+            plt.figure()
+            plt.plot(x.numpy().flatten(), y.numpy().flatten())
+            plt.title(f'Learned Function for {input}')
+            plt.xlabel(f'{input}')
+            plt.ylabel('Output')
+            plt.show()
+        else:
+            print("Plotting not implemented for this configuration")
 
 
     
@@ -156,8 +198,8 @@ class RaceModel:
 
         self.nr_riders_per_race = 5
 
-        self.feature_idxs = [9, 10, 12]
-        self.feature_names = ["startlist_score", "age", "rank_normalized"]
+        self.feature_idxs = [9, 12]
+        self.feature_names = ["startlist_score", "rank_normalized"]
         self.race_dist_idxs = [3, 4, 5]#, 6]
         self.race_dist_metrics = [
             # "distance_km",
@@ -325,10 +367,10 @@ class RaceModel:
             # neighbor_lists.append(top_indices.tolist())
 
             # Sort by date descending (most recent first)
-            # dates = X[indices, 7]
-            # sorted_order = np.argsort(dates)[::-1]  # descending
-            # top_indices = indices[sorted_order][:min(len(indices), k)]
-            # neighbor_lists.append(top_indices.tolist())
+            dates = X["date"][indices]
+            sorted_order = np.argsort(dates)[::-1]  # descending
+            top_indices = indices[sorted_order][:min(len(indices), k)]
+            neighbor_lists.append(top_indices.tolist())
 
             neighbor_lists.append(indices)
         return neighbor_lists
@@ -477,9 +519,9 @@ class RaceModel:
         self.neighbor_aggregate_function.normalize_weights()
 
     def plot_parameters(self) -> None:
-        self.neighbor_aggregate_function.plot_weights()
-        for f in self.feature_functions:
-            f.plot_learned_function()
+        self.neighbor_aggregate_function.plot_model()
+        for f, f_name in zip(self.feature_functions, self.feature_names):
+            f.plot_learned_function(f_name)
             
 
 class MLflowWrapper(mlflow.pyfunc.PythonModel):
@@ -631,12 +673,13 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
         spline_model: Model instance to train.
     """
     nr_riders_per_race = model.nr_riders_per_race
-    epochs = 500
+    epochs = 5000
     total_loss = 0
 
     start_time = time()
 
     for epoch in range(epochs):
+        #TODO: dont pick races from the beginning of all data
         random_race_id = np.random.choice(X["race_id"])
         random_rider_idxs = get_random_riders(All, random_race_id, nr_riders_per_race)
 

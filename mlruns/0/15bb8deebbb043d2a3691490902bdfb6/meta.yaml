@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/15bb8deebbb043d2a3691490902bdfb6/artifacts
+end_time: 1760289805756
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 15bb8deebbb043d2a3691490902bdfb6
+run_name: amusing-colt-430
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760289754159
+status: 4
+tags: []
+user_id: gvliegen

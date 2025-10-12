@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/26efda2e1d5f443f9ba878bc8f06b3ee/artifacts
+end_time: 1760298107158
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 26efda2e1d5f443f9ba878bc8f06b3ee
+run_name: dashing-rat-264
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760297908896
+status: 4
+tags: []
+user_id: gvliegen

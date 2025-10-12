@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/f6a047c47efe4e26baf8151a8a3f3a56/artifacts
+end_time: 1760289519193
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f6a047c47efe4e26baf8151a8a3f3a56
+run_name: youthful-skunk-120
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760289425877
+status: 4
+tags: []
+user_id: gvliegen

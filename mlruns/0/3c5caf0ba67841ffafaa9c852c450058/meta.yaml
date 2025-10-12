@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/3c5caf0ba67841ffafaa9c852c450058/artifacts
+end_time: 1760297559474
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 3c5caf0ba67841ffafaa9c852c450058
+run_name: spiffy-quail-512
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760297559408
+status: 4
+tags: []
+user_id: gvliegen

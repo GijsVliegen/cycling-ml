@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/ba3969deed3442d2a9e80e92be8a0f31/artifacts
+end_time: 1760297577226
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: ba3969deed3442d2a9e80e92be8a0f31
+run_name: bright-stork-589
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760297577143
+status: 4
+tags: []
+user_id: gvliegen
