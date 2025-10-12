@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/c689240a985c44e7b5142f5e956da5f3/artifacts
+end_time: 1760108858963
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c689240a985c44e7b5142f5e956da5f3
+run_name: dazzling-grouse-860
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760108593539
+status: 4
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/2c428c1e20354f458ea5064b01071569/artifacts
+end_time: 1760111439890
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2c428c1e20354f458ea5064b01071569
+run_name: incongruous-carp-249
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760111405405
+status: 3
+tags: []
+user_id: gvliegen

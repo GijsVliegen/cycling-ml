@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/b24b690b0b90411ba94b7b6ed42cbc78/artifacts
+end_time: 1760097195084
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b24b690b0b90411ba94b7b6ed42cbc78
+run_name: industrious-doe-709
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760096937526
+status: 4
+tags: []
+user_id: gvliegen

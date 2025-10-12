@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/ef27c3a3fd064ebd9150c7281014156f/artifacts
+end_time: 1759401339607
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: ef27c3a3fd064ebd9150c7281014156f
+run_name: abundant-moose-56
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759401299689
+status: 4
+tags: []
+user_id: gvliegen

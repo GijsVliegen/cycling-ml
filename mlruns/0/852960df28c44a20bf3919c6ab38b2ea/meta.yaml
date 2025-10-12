@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/852960df28c44a20bf3919c6ab38b2ea/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 852960df28c44a20bf3919c6ab38b2ea
+run_name: flawless-ray-757
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759184334809
+status: 1
+tags: []
+user_id: gvliegen

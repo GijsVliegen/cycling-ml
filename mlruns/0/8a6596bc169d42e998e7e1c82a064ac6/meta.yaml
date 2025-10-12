@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/8a6596bc169d42e998e7e1c82a064ac6/artifacts
+end_time: 1760128603515
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 8a6596bc169d42e998e7e1c82a064ac6
+run_name: wise-sheep-994
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760128258851
+status: 3
+tags: []
+user_id: gvliegen

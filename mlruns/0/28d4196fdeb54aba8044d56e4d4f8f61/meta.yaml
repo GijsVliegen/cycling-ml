@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/28d4196fdeb54aba8044d56e4d4f8f61/artifacts
+end_time: 1760112548027
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 28d4196fdeb54aba8044d56e4d4f8f61
+run_name: incongruous-lamb-251
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760112547989
+status: 4
+tags: []
+user_id: gvliegen

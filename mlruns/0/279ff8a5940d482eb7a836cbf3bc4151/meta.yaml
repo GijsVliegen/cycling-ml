@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/279ff8a5940d482eb7a836cbf3bc4151/artifacts
+end_time: 1759182491088
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 279ff8a5940d482eb7a836cbf3bc4151
+run_name: stately-mole-680
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759182473691
+status: 4
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/48aa9c34c064449492434d77fdd10f68/artifacts
+end_time: 1760045197990
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 48aa9c34c064449492434d77fdd10f68
+run_name: bemused-bird-584
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760045193084
+status: 3
+tags: []
+user_id: gvliegen

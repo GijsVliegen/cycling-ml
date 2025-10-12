@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/17b3614156144380bc4f68907efb6c19/artifacts
+end_time: 1760122343663
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 17b3614156144380bc4f68907efb6c19
+run_name: monumental-newt-360
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760122296762
+status: 4
+tags: []
+user_id: gvliegen

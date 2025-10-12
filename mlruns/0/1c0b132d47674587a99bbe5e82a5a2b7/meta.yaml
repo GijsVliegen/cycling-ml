@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/1c0b132d47674587a99bbe5e82a5a2b7/artifacts
+end_time: 1760095939262
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 1c0b132d47674587a99bbe5e82a5a2b7
+run_name: zealous-rat-349
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760095907891
+status: 4
+tags: []
+user_id: gvliegen

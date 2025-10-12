@@ -63,13 +63,16 @@ async def make_data_structure():
     """
     Transforms raw data into structured polars Dataframes and persists these
     """
-    
-    all_results = await get_all_results(k=500)
+    current_results = pl.read_parquet("data/results_df.parquet")
+    current_races = pl.read_parquet("data/races_df.parquet")
+    all_results = await get_all_results(k=-1)
     results_df, races_df = transform_race_data(all_results)
     print(results_df)
     print(races_df)
-    results_df.write_parquet("data/results_df.parquet")
-    races_df.write_parquet("data/races_df.parquet")
+    combined_results_df = pl.concat([current_results, results_df]).unique(subset=["name", "race_id"])
+    combined_results_df.write_parquet("data/results_df.parquet")
+    combined_races = pl.concat([current_races, races_df]).unique(subset=["race_id"])
+    combined_races.write_parquet("data/races_df.parquet")
 
 async def test_data_structure(race_url):
 

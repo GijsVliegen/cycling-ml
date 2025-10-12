@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/e0af2c881c074c669ce7346cafc1519d/artifacts
+end_time: 1760279847624
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e0af2c881c074c669ce7346cafc1519d
+run_name: blushing-pig-290
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760279847434
+status: 4
+tags: []
+user_id: gvliegen

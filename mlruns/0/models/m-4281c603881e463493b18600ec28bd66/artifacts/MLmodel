@@ -1,0 +1,19 @@
+artifact_path: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/models/m-4281c603881e463493b18600ec28bd66/artifacts
+flavors:
+  python_function:
+    cloudpickle_version: 3.1.1
+    code: null
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.model
+    python_model: python_model.pkl
+    python_version: 3.12.3
+    streamable: false
+mlflow_version: 3.4.0
+model_id: m-4281c603881e463493b18600ec28bd66
+model_size_bytes: 47249
+model_uuid: m-4281c603881e463493b18600ec28bd66
+prompts: null
+run_id: 63fdd647720747d7b3bbc85f770e4807
+utc_time_created: '2025-10-12 15:24:38.064731'

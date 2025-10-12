@@ -498,8 +498,22 @@ def check_features_stats():
     print("Races per classification:")
     print(races_per_classification)
 
+    # Riders per race
+    riders_per_race = features_df.group_by('race_id').agg(pl.
+    col('name').n_unique().alias('num_riders'))
+    min_riders = riders_per_race.select(pl.col('num_riders').
+    min()).item()
+    max_riders = riders_per_race.select(pl.col('num_riders').
+    max()).item()
+    mean_riders = riders_per_race.select(pl.
+    col('num_riders').mean()).item()
+    print(f'Min riders per race: {min_riders}')
+    print(f'Max riders per race: {max_riders}')
+    print(f'Mean riders per race: {mean_riders:.2f}')
+    
+
 if __name__ == "__main__":
-    main()
+    # main()
     # check_results_df()
     # check_races_df()
-    # check_features_stats()
+    check_features_stats()

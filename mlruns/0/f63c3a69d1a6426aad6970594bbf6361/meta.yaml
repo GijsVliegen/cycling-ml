@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/f63c3a69d1a6426aad6970594bbf6361/artifacts
+end_time: 1760122846374
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f63c3a69d1a6426aad6970594bbf6361
+run_name: upbeat-whale-673
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760122747322
+status: 3
+tags: []
+user_id: gvliegen

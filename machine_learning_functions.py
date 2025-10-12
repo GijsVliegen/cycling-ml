@@ -21,7 +21,20 @@ class WeightedNeighbourAggregator(nn.Module):
         self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
         self.optimizer = optim.Adam(self.parameters(), lr=0.01)
 
-    def forward(self, center_features, neighbor_features, neighbor_scores):
+    def get_time_weights(self, center_date, neighbor_dates) -> torch.tensor:
+        months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
+        decay_rate = 1/(365*2)
+        time_weights: np.array = np.exp( -1 * decay_rate * months_diff)
+        return torch.from_numpy(time_weights)
+
+    def forward(
+        self, 
+        center_features, 
+        neighbor_features, 
+        neighbor_scores,
+        center_date,
+        neighbor_dates
+    ):
         """
         center_features: [nr_of_features]
         neighbor_features: [N, nr_of_features]
@@ -31,12 +44,14 @@ class WeightedNeighbourAggregator(nn.Module):
         diff = center_features - neighbor_features  # [N, D]
         weighted_diff = (diff ** 2) * self.feature_weights  # [N, D]
         dist = torch.sqrt(weighted_diff.sum(dim=-1) + 1e-8)  # [N]
-
-        # Convert distances to weights (Gaussian kernel)
         weights = torch.exp(-dist)  # [N]
+        time_weights = self.get_time_weights(
+            center_date=center_date,
+            neighbor_dates=neighbor_dates,
+        )
 
         # Aggregate neighbor scores as weighted average
-        aggregated_score = torch.sum(weights * neighbor_scores) / torch.sum(weights)
+        aggregated_score = torch.sum(weights * time_weights * neighbor_scores) / torch.sum(weights)
 
         return aggregated_score
     
@@ -49,6 +64,9 @@ class WeightedNeighbourAggregator(nn.Module):
 
     def plot_weights(self):
         print(f"feature weights: {self.feature_weights}")
+
+    def normalize_weights(self):
+        pass
     
 
 class NeuralNet(nn.Module):
@@ -123,8 +141,6 @@ class RaceModel:
     historical performance and race characteristics.
     """
 
-    nr_riders_per_race = 5
-
     def __init__(self, X: np.ndarray) -> None:
         """
         Initializes the RaceModel model.
@@ -137,6 +153,9 @@ class RaceModel:
         # 10-11: age | rank_bucket | rank_normalized
 
         self.init_feature_funcs = self._init_feature_funcs(X)
+
+        self.nr_riders_per_race = 5
+
         self.feature_idxs = [9, 10, 12]
         self.feature_names = ["startlist_score", "age", "rank_normalized"]
         self.race_dist_idxs = [3, 4, 5]#, 6]
@@ -151,6 +170,7 @@ class RaceModel:
             len(self.race_dist_idxs),  #length
             1/len(self.race_dist_idxs) #init weights
         )
+        self.race_date_idx = 7
         self.lr_distance = 1e-4
 
         self.feature_functions: list[NeuralNet] = [
@@ -186,9 +206,9 @@ class RaceModel:
             clipped_x = np.clip(x, 1, rank_max-1) #avoid too steep decline
             return -np.exp(weight * clipped_x) + 2
         
-        a = min(X[:,9])
-        b = np.mean(X[:,9])
-        c = max(X[:,9])
+        a = min(X["startlist_score"])
+        b = np.mean(X["startlist_score"])
+        c = max(X["startlist_score"])
         A = np.array([
             [a**2, a, 1],
             [b**2, b, 1],
@@ -279,10 +299,17 @@ class RaceModel:
         n_data = X.shape[0]
 
         # Vectorized masking using broadcasting
+        # mask = (
+        #     (rider_data[:, None, 0] == X[None, :, 0]) &  # same name
+        #     (rider_data[:, None, 1] != X[None, :, 1]) &  # different race
+        #     (X[None, :, 6] <= rider_data[:, None, 6]) &  # earlier or same date
+        #     ((X[:, 8]) <= 25) #rank top-25
+        # )
         mask = (
-            (rider_data[:, None, 0] == X[None, :, 0]) &  # same name
-            (rider_data[:, None, 1] != X[None, :, 1]) &  # different race
-            (X[None, :, 6] <= rider_data[:, None, 6])   # earlier or same year
+            (rider_data['name'][:, None] == X['name'][None, :]) &       # same rider
+            (rider_data['race_id'][:, None] != X['race_id'][None, :]) &   # different race
+            (X['date'][None, :] <= rider_data['date'][:, None]) &         # earlier or same date
+            (X['rank'][None, :] <= 25)                                    # rank top-25
         )
 
         neighbor_lists = []
@@ -296,6 +323,13 @@ class RaceModel:
             # sorted_order = np.argsort(ranks)
             # top_indices = indices[sorted_order][:k]
             # neighbor_lists.append(top_indices.tolist())
+
+            # Sort by date descending (most recent first)
+            # dates = X[indices, 7]
+            # sorted_order = np.argsort(dates)[::-1]  # descending
+            # top_indices = indices[sorted_order][:min(len(indices), k)]
+            # neighbor_lists.append(top_indices.tolist())
+
             neighbor_lists.append(indices)
         return neighbor_lists
 
@@ -351,7 +385,14 @@ class RaceModel:
             torch_data = torch_data
         )
         loss = self._list_preference_loss(Y_pred_scores, Y_true_order)
-        loss.backward()
+
+        if loss.requires_grad:
+            loss.backward()
+        else:
+            print(f"""Loss does not require grad. Inspecting:
+                loss={loss}, requires_grad={loss.requires_grad},
+                grad_fn={loss.grad_fn}"""
+            )
         self._step()
         # for f in self.feature_functions:
         #     total_norm = 0
@@ -415,15 +456,25 @@ class RaceModel:
                 rider_scores.append(torch.tensor(-10.0))
             else:
                 neigh_scores = neighbor_scores[offset:offset + count]
-                center_race_features = torch_data[rider_idx][self.race_dist_idxs]
-                neighbor_race_features = torch_data[all_neighbor_idxs[offset:offset + count]][:, self.race_dist_idxs]
+                center_race_features: torch.tensor = torch_data[rider_idx][self.race_dist_idxs]
+                neighbor_race_features: torch.tensor = torch_data[all_neighbor_idxs[offset:offset + count]][:, self.race_dist_idxs]
+                center_date: np.array = all_data["date"][rider_idx]
+                neighbor_dates: np.array = all_data["date"][all_neighbor_idxs[offset:offset + count]]
+
                 rider_score = self.neighbor_aggregate_function.forward(
-                    center_race_features, neighbor_race_features, neigh_scores
+                    center_race_features, 
+                    neighbor_race_features, 
+                    neigh_scores,
+                    center_date, 
+                    neighbor_dates
                 )
                 rider_scores.append(rider_score)
             offset += count
 
         return torch.stack(rider_scores)
+
+    def normalize_distance_weights(self):
+        self.neighbor_aggregate_function.normalize_weights()
 
     def plot_parameters(self) -> None:
         self.neighbor_aggregate_function.plot_weights()
@@ -451,8 +502,8 @@ class MLflowWrapper(mlflow.pyfunc.PythonModel):
             Dict with 'top_riders' and 'top_scores'.
         """
         All = np.load('data/features_df.npy')
-        rider_idxs = np.where(All[:, 1] == race_id)[0]
-        rider_names = All[rider_idxs, 0]
+        rider_idxs = np.where(All["race_id"] == race_id)[0]
+        rider_names = All["name"][rider_idxs]
         
         # if len(rider_idxs) == 0:
         #     return {'riders': [], 'scores': []}
@@ -461,6 +512,63 @@ class MLflowWrapper(mlflow.pyfunc.PythonModel):
 
         return {'riders': rider_names, 'scores': Y_pred_scores.tolist()}
 
+def polars_to_structured_array(df: pl.DataFrame, max_str_len=64):
+    """
+    Convert a Polars DataFrame to a NumPy structured array with appropriate dtypes.
+    
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Polars DataFrame to convert.
+    max_str_len : int
+        Maximum length for string columns (for fixed-length Unicode arrays).
+    
+    Returns
+    -------
+    np.ndarray
+        Structured NumPy array.
+    """
+    
+    dtype = []
+
+    # dtypes = [ #TODO use this instead of checking polars dtpye
+    #     ("name", str),
+    #     ("race_id", np.float64),
+    #     ("distance_km", np.float64),
+    #     ("elevation_m", np.float64),
+    #     ("race_id", np.float64),
+    #     ("profile_score", np.float64),
+    #     ("profile_score_last_25k", np.float64),
+    #     ("classification", str),
+    #     ("date", np.datetime64),
+    #     ("rank", np.float64),
+    #     ("startlist_score", np.float64),
+    #     ("age", np.float64),
+    #     ("rank_bucket", np.float64),
+    #     ("rank_normalized", np.float64),
+    # ]
+    for name, dtype_pol in zip(df.columns, df.dtypes):
+        if dtype_pol == pl.Date or name == "date":
+            dtype.append((name, 'datetime64[D]'))
+        elif dtype_pol == pl.Datetime:
+            dtype.append((name, 'datetime64[ns]'))
+        elif dtype_pol == pl.Float64:
+            dtype.append((name, np.float64))
+        elif dtype_pol == pl.Int64:
+            dtype.append((name, np.int64))
+        elif dtype_pol == pl.Utf8:
+            dtype.append((name, f'U{max_str_len}'))  # fixed-length Unicode
+        else:
+            # fallback: store as object
+            dtype.append((name, object))
+    
+    # Preallocate structured array
+    arr = np.empty(len(df), dtype=dtype)
+    
+    for name in df.columns:
+        arr[name] = df[name].to_numpy()
+    
+    return arr
 
 def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -473,8 +581,13 @@ def split_train_test(All: pl.DataFrame, test_ratio: float = 0.2) -> Tuple[np.nda
     Returns:
         Tuple of (train_array, test_array).
     """
+
     split_idx = int((1 - test_ratio) * All.height)
-    return All[:split_idx].to_numpy(), All[split_idx:].to_numpy()
+
+    X = polars_to_structured_array(All[:split_idx])
+    Y = polars_to_structured_array(All[split_idx:])
+
+    return X, Y
 
 def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank = -1) -> np.ndarray:
     """
@@ -490,16 +603,16 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank =
     """
     if min_rank != -1:
         top_rider_idxs = np.where(
-            (All[:,1] == race_id) & (All[:, 8] <= min_rank)
+            (All["race_id"] == race_id) & (All["rank"] <= min_rank)
         )[0]
         n = min(min_nr, len(top_rider_idxs))
         return np.random.choice(top_rider_idxs, size=n, replace=False)
 
     top_rider_idxs = np.where(
-        (All[:,1] == race_id) & (All[:, 8] <= 25)
+        (All["race_id"] == race_id) & (All["rank"] <= 25)
     )[0] #top 25 results
     bottom_rider_idxs = np.where(
-        (All[:,1] == race_id) & (All[:, 8] >= 25)
+        (All["race_id"] == race_id) & (All["rank"] >= 25)
     )[0] #bottom results
     n = min(min_nr , min(len(top_rider_idxs), len(bottom_rider_idxs)))
     return np.concatenate((
@@ -517,21 +630,21 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
         X: Training subset.
         spline_model: Model instance to train.
     """
-    nr_riders_per_race = 4
+    nr_riders_per_race = model.nr_riders_per_race
     epochs = 500
     total_loss = 0
 
     start_time = time()
 
     for epoch in range(epochs):
-        random_race_id = np.random.choice(X[:,1])
+        random_race_id = np.random.choice(X["race_id"])
         random_rider_idxs = get_random_riders(All, random_race_id, nr_riders_per_race)
 
-        if len(random_rider_idxs) < nr_riders_per_race:
-            print(f"not enough riders in this race, continued")
-            continue
+        # if len(random_rider_idxs) < nr_riders_per_race:
+        #     print(f"not enough riders in this race, continued")
+        #     continue
 
-        Y_true_ranking = All[random_rider_idxs, 8]
+        Y_true_ranking = All["rank"][random_rider_idxs]
         loss = model.training_step(
             Y_true_ranking = Y_true_ranking, 
             indices = random_rider_idxs, 
@@ -544,6 +657,8 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
             print(f"Epoch {epoch}, Loss: {total_loss}")
             model.plot_parameters()
             total_loss = 0
+            model.normalize_distance_weights()
+
     training_time = time() - start_time
     print(f"training time (s) = {training_time}")
     return training_time
@@ -561,8 +676,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
         Dict of performance metrics (MSE, MAE, R2).
     """
 
-    race_ids = np.unique(Y[:, 1])
-    test_size = len(race_ids)
+    race_ids = np.unique(Y["race_id"])
+    test_size = 50#len(race_ids)
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
 
     nr_riders_per_race = 100
@@ -609,7 +724,7 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
         # if len(random_rider_idxs) < nr_riders_per_race:
         #     continue
 
-        Y_true_ranking = All[random_rider_idxs, 8]
+        Y_true_ranking = All["rank"][random_rider_idxs]
         Y_true_order = np.argsort(np.argsort(Y_true_ranking))
         Y_pred_scores = model.predict_ranking_for_race(
             indices = random_rider_idxs,
@@ -628,18 +743,22 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
 
 def main() -> None:
     race_result_features = pl.read_parquet("data/features_df.parquet")
-
+    print(race_result_features.columns)
+    print(race_result_features.dtypes)
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     All = np.concatenate(X_Y)
+    print(All.dtype)
     neural_net = RaceModel(All)
 
-    torch_data = np.zeros(All.shape, dtype=float)
-    for j in range(All.shape[1]):
-        col = All[:, j]
+    #TODO: use All.shape + length of row, instead of converting to unstructured array
+    All_unstructured = np.column_stack([All[name] for name in All.dtype.names])
+    torch_data = np.zeros(All_unstructured.shape, dtype=float)
+    for i, col_name in enumerate(race_result_features.columns):
+        col = All[col_name]
         try:
-            torch_data[:, j] = col.astype(float)#.float()
+            torch_data[:, i] = col.astype(float)#.float()
         except (ValueError, TypeError):
-            torch_data[:, j] = 0.0
+            torch_data[:, i] = 0.0
     torch_data = torch.from_numpy(torch_data).float()
 
 

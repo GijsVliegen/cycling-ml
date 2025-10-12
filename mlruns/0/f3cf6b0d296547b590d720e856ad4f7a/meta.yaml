@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/f3cf6b0d296547b590d720e856ad4f7a/artifacts
+end_time: 1760045008590
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f3cf6b0d296547b590d720e856ad4f7a
+run_name: brawny-frog-112
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760045003776
+status: 3
+tags: []
+user_id: gvliegen

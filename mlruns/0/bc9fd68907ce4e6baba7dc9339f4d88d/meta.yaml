@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/bc9fd68907ce4e6baba7dc9339f4d88d/artifacts
+end_time: 1760094509866
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: bc9fd68907ce4e6baba7dc9339f4d88d
+run_name: delightful-frog-346
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760094488724
+status: 4
+tags: []
+user_id: gvliegen

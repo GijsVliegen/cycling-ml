@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/da12b89d1718424e970f5d82b924657a/artifacts
+end_time: 1759182458021
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: da12b89d1718424e970f5d82b924657a
+run_name: sassy-snail-524
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759182453608
+status: 4
+tags: []
+user_id: gvliegen

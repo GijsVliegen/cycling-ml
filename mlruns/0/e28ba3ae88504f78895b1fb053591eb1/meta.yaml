@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/e28ba3ae88504f78895b1fb053591eb1/artifacts
+end_time: 1760042537410
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e28ba3ae88504f78895b1fb053591eb1
+run_name: lyrical-deer-587
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760042466705
+status: 4
+tags: []
+user_id: gvliegen

@@ -9,8 +9,8 @@ import re
 BASE_URL = "https://www.procyclingstats.com"
 
 # ---- Config ----
-START_YEAR = 2010 #goes back to pre-1940
-END_YEAR = 2013
+START_YEAR = 2020 #goes back to pre-1940
+END_YEAR = 2024
 CONCURRENT_REQUESTS = 10
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 

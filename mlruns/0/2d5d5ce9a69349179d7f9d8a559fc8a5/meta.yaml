@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/2d5d5ce9a69349179d7f9d8a559fc8a5/artifacts
+end_time: 1759184411611
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2d5d5ce9a69349179d7f9d8a559fc8a5
+run_name: grandiose-shrike-436
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759184400582
+status: 4
+tags: []
+user_id: gvliegen

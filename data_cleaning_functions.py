@@ -14,8 +14,6 @@ import hashlib
 BASE_URL = "https://www.procyclingstats.com"
 
 # ---- Config ----
-START_YEAR = 2010
-END_YEAR = 2025
 CONCURRENT_REQUESTS = 10
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/a8d31b5e63284d139b3c9e609b699ba1/artifacts
+end_time: 1759233885930
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a8d31b5e63284d139b3c9e609b699ba1
+run_name: chill-lark-243
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759233873722
+status: 4
+tags: []
+user_id: gvliegen

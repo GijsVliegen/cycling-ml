@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/a181aac72057430d9a02de54fa43a58b/artifacts
+end_time: 1760099733457
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a181aac72057430d9a02de54fa43a58b
+run_name: bold-ray-653
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760099477998
+status: 3
+tags: []
+user_id: gvliegen

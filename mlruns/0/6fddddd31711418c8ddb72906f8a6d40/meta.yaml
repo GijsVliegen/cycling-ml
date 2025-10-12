@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/6fddddd31711418c8ddb72906f8a6d40/artifacts
+end_time: 1760095219223
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 6fddddd31711418c8ddb72906f8a6d40
+run_name: valuable-eel-430
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760095213772
+status: 4
+tags: []
+user_id: gvliegen

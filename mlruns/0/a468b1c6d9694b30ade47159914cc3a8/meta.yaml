@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/a468b1c6d9694b30ade47159914cc3a8/artifacts
+end_time: 1760123689282
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a468b1c6d9694b30ade47159914cc3a8
+run_name: intrigued-sow-120
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760123682007
+status: 4
+tags: []
+user_id: gvliegen

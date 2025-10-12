@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/b485434c915840abbbb72d1f3eaa7277/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b485434c915840abbbb72d1f3eaa7277
+run_name: redolent-shrew-934
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760042603198
+status: 1
+tags: []
+user_id: gvliegen

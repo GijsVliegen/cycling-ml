@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/a891b1baa1664bb89a03645dff6674f7/artifacts
+end_time: 1759401479831
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a891b1baa1664bb89a03645dff6674f7
+run_name: resilient-gull-122
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1759401471458
+status: 4
+tags: []
+user_id: gvliegen

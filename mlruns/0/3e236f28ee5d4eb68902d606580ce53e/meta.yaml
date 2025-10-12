@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/3e236f28ee5d4eb68902d606580ce53e/artifacts
+end_time: 1760281364629
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 3e236f28ee5d4eb68902d606580ce53e
+run_name: valuable-frog-526
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760279855212
+status: 3
+tags: []
+user_id: gvliegen

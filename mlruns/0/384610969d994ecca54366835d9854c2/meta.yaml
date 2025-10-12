@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/384610969d994ecca54366835d9854c2/artifacts
+end_time: 1760093448395
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 384610969d994ecca54366835d9854c2
+run_name: enthused-panda-811
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760093405595
+status: 3
+tags: []
+user_id: gvliegen

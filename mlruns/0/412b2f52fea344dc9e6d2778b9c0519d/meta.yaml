@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/412b2f52fea344dc9e6d2778b9c0519d/artifacts
+end_time: 1760282508915
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 412b2f52fea344dc9e6d2778b9c0519d
+run_name: polite-newt-314
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760282453279
+status: 3
+tags: []
+user_id: gvliegen

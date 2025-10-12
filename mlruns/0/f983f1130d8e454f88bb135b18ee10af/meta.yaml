@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/f983f1130d8e454f88bb135b18ee10af/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f983f1130d8e454f88bb135b18ee10af
+run_name: enchanting-bird-878
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760093775783
+status: 1
+tags: []
+user_id: gvliegen

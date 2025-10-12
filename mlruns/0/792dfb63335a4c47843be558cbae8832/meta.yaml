@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/792dfb63335a4c47843be558cbae8832/artifacts
+end_time: 1760283587463
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 792dfb63335a4c47843be558cbae8832
+run_name: adorable-bat-35
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760283382329
+status: 4
+tags: []
+user_id: gvliegen

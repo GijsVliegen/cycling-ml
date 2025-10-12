@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/f2d399ee155d470fafa6b4be461ac4c4/artifacts
+end_time: 1760044418859
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f2d399ee155d470fafa6b4be461ac4c4
+run_name: overjoyed-shad-751
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760044418802
+status: 4
+tags: []
+user_id: gvliegen

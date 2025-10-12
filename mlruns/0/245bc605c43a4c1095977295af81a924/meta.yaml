@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/245bc605c43a4c1095977295af81a924/artifacts
+end_time: 1760124704504
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 245bc605c43a4c1095977295af81a924
+run_name: worried-moth-425
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760124704459
+status: 4
+tags: []
+user_id: gvliegen

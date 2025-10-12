@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/a036aecdea8a400c9c0b54e4c38af1a7/artifacts
+end_time: 1760045228492
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a036aecdea8a400c9c0b54e4c38af1a7
+run_name: unique-seal-726
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760045223549
+status: 3
+tags: []
+user_id: gvliegen

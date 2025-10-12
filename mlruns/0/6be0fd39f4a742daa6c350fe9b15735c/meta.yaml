@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/6be0fd39f4a742daa6c350fe9b15735c/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 6be0fd39f4a742daa6c350fe9b15735c
+run_name: serious-quail-356
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760043321496
+status: 1
+tags: []
+user_id: gvliegen

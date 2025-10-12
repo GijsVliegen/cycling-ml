@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/6a3cc39a977c46da99bae0620781079b/artifacts
+end_time: 1760123843726
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 6a3cc39a977c46da99bae0620781079b
+run_name: unruly-loon-582
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760123843676
+status: 4
+tags: []
+user_id: gvliegen

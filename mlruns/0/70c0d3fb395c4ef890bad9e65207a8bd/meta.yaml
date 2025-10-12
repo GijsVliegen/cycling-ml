@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/70c0d3fb395c4ef890bad9e65207a8bd/artifacts
+end_time: 1760125891713
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 70c0d3fb395c4ef890bad9e65207a8bd
+run_name: fearless-gnu-264
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760125822869
+status: 3
+tags: []
+user_id: gvliegen

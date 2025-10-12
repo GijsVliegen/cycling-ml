@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/e829e4db60f142dab4dfe33f1d60dd5e/artifacts
+end_time: 1760096018673
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e829e4db60f142dab4dfe33f1d60dd5e
+run_name: vaunted-stork-325
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760095989027
+status: 4
+tags: []
+user_id: gvliegen

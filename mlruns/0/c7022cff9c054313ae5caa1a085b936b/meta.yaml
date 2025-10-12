@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/c7022cff9c054313ae5caa1a085b936b/artifacts
+end_time: 1760094435765
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c7022cff9c054313ae5caa1a085b936b
+run_name: languid-snake-890
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760094435705
+status: 4
+tags: []
+user_id: gvliegen

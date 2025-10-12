@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/7b83315adf014457967bd681ab5149fe/artifacts
+end_time: 1760288217797
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 7b83315adf014457967bd681ab5149fe
+run_name: tasteful-fawn-693
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760288190145
+status: 4
+tags: []
+user_id: gvliegen

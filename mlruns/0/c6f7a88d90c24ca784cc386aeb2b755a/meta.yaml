@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/c6f7a88d90c24ca784cc386aeb2b755a/artifacts
+end_time: 1760282065522
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c6f7a88d90c24ca784cc386aeb2b755a
+run_name: agreeable-bug-940
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760282056361
+status: 4
+tags: []
+user_id: gvliegen
