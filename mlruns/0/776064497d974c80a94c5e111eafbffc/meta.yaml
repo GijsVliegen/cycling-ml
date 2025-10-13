@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/776064497d974c80a94c5e111eafbffc/artifacts
+end_time: 1760359109222
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 776064497d974c80a94c5e111eafbffc
+run_name: luxuriant-kite-670
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760358998902
+status: 4
+tags: []
+user_id: gvliegen

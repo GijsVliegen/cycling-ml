@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/967003dd58cc4217ab85932abbdd1444/artifacts
+end_time: 1760299763547
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 967003dd58cc4217ab85932abbdd1444
+run_name: nosy-sponge-564
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760299731384
+status: 4
+tags: []
+user_id: gvliegen

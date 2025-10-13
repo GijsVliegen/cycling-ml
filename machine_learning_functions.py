@@ -30,6 +30,7 @@ class WeightedNeighbourAggregator(nn.Module):
 
         self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
         self.optimizer = optim.Adam(self.parameters(), lr=0.01)
+        self.history = []
 
     def get_time_weights(self, center_date, neighbor_dates) -> torch.tensor:
         months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
@@ -66,10 +67,6 @@ class WeightedNeighbourAggregator(nn.Module):
             breakpoint()
         aggregated_score *= self.net(torch.tensor([neighbor_scores.numel()]).float())[0]
 
-
-        #TODO: currently all (top 25) scores are averaged. this means one win in entire career results in high score, but 20 top10s over 3 years, not so.  
-        # -> add penalty
-
         return aggregated_score
     
     def step(self):
@@ -78,6 +75,13 @@ class WeightedNeighbourAggregator(nn.Module):
 
     def zero_grad(self):
         self.optimizer.zero_grad()
+
+    def save_function(self, epoch):
+        # self.history.append((epoch, self.feature_weights.detach().numpy()))
+        x = torch.linspace(0, 25, 100).unsqueeze(1)
+        with torch.no_grad():
+            y = self.net(x)
+        self.history.append((epoch, x.numpy().flatten(), y.numpy().flatten()))
 
     def plot_model(self):
         print(f"feature weights: {self.feature_weights}")
@@ -138,6 +142,7 @@ class NeuralNet(nn.Module):
         # self.criterion = nn.MarginRankingLoss(margin=1.0)
 
         self.separate_inputs = nr_of_features > 2 and not correlated
+        self.history = []
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         if self.separate_inputs:
@@ -159,19 +164,12 @@ class NeuralNet(nn.Module):
     def zero_grad(self):
         self.optimizer.zero_grad()
 
-    def plot_learned_function(self, input):
+    def save_function(self, epoch):
         if hasattr(self, 'net') and self.net[0].in_features == 1:
             x = torch.linspace(0, 1, 100).unsqueeze(1)
             with torch.no_grad():
                 y = self.net(x)
-            plt.figure()
-            plt.plot(x.numpy().flatten(), y.numpy().flatten())
-            plt.title(f'Learned Function for {input}')
-            plt.xlabel(f'{input}')
-            plt.ylabel('Output')
-            plt.show()
-        else:
-            print("Plotting not implemented for this configuration")
+            self.history.append((epoch, x.numpy().flatten(), y.numpy().flatten()))
 
 
     
@@ -279,17 +277,20 @@ class RaceModel:
         # print(f"{score_preferred:.3e}, {score_rejected:.3e}")
         return -F.logsigmoid(score_preferred - score_rejected)
 
-    def _get_pairs(self, correct_order):
+    def _get_pairs(self, correct_order: np.array, correct_ranking: np.array):
         """According to chatgpt very fast"""
+        """only return pairs for which one result was top 25"""
+
+        nr_of_top_25 = np.sum(correct_ranking <= 25)
         N = len(correct_order)
-        num_pairs = N * (N - 1) // 2
+        num_pairs = (N - nr_of_top_25) * nr_of_top_25 + (nr_of_top_25 * (nr_of_top_25 - 1)) // 2
 
         # Preallocate arrays
         first_elements = np.empty(num_pairs, dtype=np.int32)
         second_elements = np.empty(num_pairs, dtype=np.int32)
 
         idx = 0
-        for i in range(N):
+        for i in range(nr_of_top_25):
             length = N - i - 1
             first_elements[idx:idx+length] = correct_order[i]
             second_elements[idx:idx+length] = correct_order[i+1:]
@@ -298,23 +299,14 @@ class RaceModel:
         return first_elements, second_elements
 
 
-    def _list_preference_loss(self, scores, correct_order):
-        preferred_idxs, rejected_idxs = self._get_pairs(correct_order)
+    def _list_preference_loss(self, scores: torch.tensor, correct_order: np.array, correct_ranking: np.array):
+        preferred_idxs, rejected_idxs = self._get_pairs(correct_order, correct_ranking)
         preferred_scores = scores[preferred_idxs]
         rejected_scores = scores[rejected_idxs]
         losses = self._pairwise_preference_loss(preferred_scores, rejected_scores)
         return torch.sum(losses)
 
     def _step(self):
-        
-        # TODO: update distance weights
-        # if x is not None and data is not None and neighbor_distances is not None and len(neighbor_distances) > 0:
-        #     diffs = x[self.race_dist_idxs] - data[neighbor_idxs][:, self.race_dist_idxs]
-        #     grad = np.sum(error * (diffs**2) / (2 * (neighbor_distances[:, None] + 0.001)), axis=0).astype(float)
-        #     self.distance_weights -= self.lr_distance * grad
-        #     self.distance_weights = np.maximum(self.distance_weights, 0)  # keep non-negative
-        #     self.distance_weights /= np.sum(self.distance_weights)  # normalize
-
         for f in self.feature_functions:
             f.step()
         self.neighbor_aggregate_function.step()
@@ -426,7 +418,7 @@ class RaceModel:
             data = data,
             torch_data = torch_data
         )
-        loss = self._list_preference_loss(Y_pred_scores, Y_true_order)
+        loss = self._list_preference_loss(scores = Y_pred_scores, correct_order= Y_true_order, correct_ranking=Y_true_ranking)
 
         if loss.requires_grad:
             loss.backward()
@@ -453,7 +445,6 @@ class RaceModel:
         rider_idxs: List[int],
         nr_neighbors: int = 25,
     ) -> torch.tensor:
-        #TODO: return one tensor
         """
         Computes feature scores for k-nearest neighbors of multiple riders in a race.
 
@@ -518,11 +509,38 @@ class RaceModel:
     def normalize_distance_weights(self):
         self.neighbor_aggregate_function.normalize_weights()
 
-    def plot_parameters(self) -> None:
-        self.neighbor_aggregate_function.plot_model()
-        for f, f_name in zip(self.feature_functions, self.feature_names):
-            f.plot_learned_function(f_name)
-            
+    def plot_all_learned_functions(self):
+        #TODO: move code to their respective classes
+        # Plot feature functions history in one grid
+        if self.feature_functions and self.feature_functions[0].history:
+            fig, axes = plt.subplots(1, len(self.feature_functions) + 1, figsize=(15, 5))
+            if len(self.feature_functions) == 1:
+                axes = [axes]
+            for i, ax in enumerate(axes):
+                if i == len(axes) -1: #last element
+                    for epoch, x_vals, y_vals in self.neighbor_aggregate_function.history:
+                        ax.plot(x_vals, y_vals, label=f'Epoch {epoch}')
+                    ax.set_title('Learned Function for nr_of_neighbors')
+                    ax.set_xlabel('nr_of_neighbors')
+                    ax.set_ylabel('Output')
+                    ax.legend()
+                    continue
+
+                f = self.feature_functions[i]
+                for epoch, x_vals, y_vals in f.history:
+                    ax.plot(x_vals, y_vals, label=f'Epoch {epoch}')
+                ax.set_title(f'{self.feature_names[i]} Evolution')
+                ax.set_xlabel(f'{self.feature_names[i]}')
+                ax.set_ylabel('Output')
+                ax.legend()
+
+        # Plot neighbor aggregate weights history
+        plt.title('Neighbor Aggregate Weights Evolution')
+        plt.xlabel('Epoch')
+        plt.ylabel('Weight Value')
+        plt.legend()
+        plt.show()
+
 
 class MLflowWrapper(mlflow.pyfunc.PythonModel):
     """
@@ -679,13 +697,9 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
     start_time = time()
 
     for epoch in range(epochs):
-        #TODO: dont pick races from the beginning of all data
-        random_race_id = np.random.choice(X["race_id"])
+        not_early_date = X["date"] > np.datetime64("2014-01-01")
+        random_race_id = np.random.choice(X[not_early_date]["race_id"])
         random_rider_idxs = get_random_riders(All, random_race_id, nr_riders_per_race)
-
-        # if len(random_rider_idxs) < nr_riders_per_race:
-        #     print(f"not enough riders in this race, continued")
-        #     continue
 
         Y_true_ranking = All["rank"][random_rider_idxs]
         loss = model.training_step(
@@ -696,14 +710,18 @@ def train_model(All: np.ndarray, X: np.ndarray, model: NeuralNet, torch_data: to
         )
         total_loss += loss
 
-        if epoch % (epochs/10) == 0:
+        if epoch % (epochs / 5) == 0:
+            for f in model.feature_functions:
+                f.save_function(epoch)
+            model.neighbor_aggregate_function.save_function(epoch)
             print(f"Epoch {epoch}, Loss: {total_loss}")
-            model.plot_parameters()
+            print(f"Feature weights: {model.neighbor_aggregate_function.feature_weights}")
             total_loss = 0
             model.normalize_distance_weights()
 
     training_time = time() - start_time
     print(f"training time (s) = {training_time}")
+    model.plot_all_learned_functions()
     return training_time
 
 def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, torch_data: torch.tensor) -> Dict[str, float]:
@@ -740,6 +758,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
         correct_pairs = 0
 
         for i, j in itertools.combinations(range(len(scores)), 2):
+            if true_ranks[i] > 25 and true_ranks[j] > 25:
+                continue
             total_pairs += 1
             # Compare ground truth order
             gt = true_ranks[i] < true_ranks[j]
@@ -786,8 +806,6 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
 
 def main() -> None:
     race_result_features = pl.read_parquet("data/features_df.parquet")
-    print(race_result_features.columns)
-    print(race_result_features.dtypes)
     X_Y: tuple[np.ndarray, np.ndarray] = split_train_test(race_result_features)
     All = np.concatenate(X_Y)
     print(All.dtype)

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/b1e847a56b574a4989a1a066edfbe6e5/artifacts
+end_time: 1760298851975
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b1e847a56b574a4989a1a066edfbe6e5
+run_name: entertaining-hen-13
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760298845876
+status: 4
+tags: []
+user_id: gvliegen

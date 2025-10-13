@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/55e7360824c841aaa8d493309fd88fab/artifacts
+end_time: 1760299466606
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 55e7360824c841aaa8d493309fd88fab
+run_name: flawless-crab-814
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760299398860
+status: 3
+tags: []
+user_id: gvliegen
