@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/02c6c6ba711342ddbe32f36497a05d6d/artifacts
+end_time: 1760541817711
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 02c6c6ba711342ddbe32f36497a05d6d
+run_name: abrasive-mouse-93
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760540898359
+status: 3
+tags: []
+user_id: gvliegen

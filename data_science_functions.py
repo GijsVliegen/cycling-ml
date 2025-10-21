@@ -363,33 +363,52 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
         (
             (pl.col("rank") / pl.col("rank").max().over("race_id")) 
         ).alias("rank_norm")
+    ).with_columns(
+        (
+            ((pl.col("age") - pl.col("age").min()) / pl.col("age").max()) 
+        ).alias("age_norm")
+    ).with_columns(
+        pl.col("date").str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+        .dt.year().alias("year")
     )
 
-
-    # rider_results_and_weights.with_columns([
-    #     pl.when(pl.col("rank") <= 3)
-    #         .then((
-    #             pl.when(pl.col("rank") <= 3)
-    #                 .then(pl.struct(["name","year"])) .otherwise(None)
-    #             .n_unique().over("name") - 1)
-    #         ).when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
-    #         .then((
-    #             pl.when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
-    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
-    #             .n_unique().over("name") - 1)
-    #         ).when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
-    #         .then((
-    #             pl.when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
-    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
-    #             .n_unique().over("name") - 1)
-    #         ).when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
-    #         .then((
-    #             pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
-    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
-    #             .n_unique().over("name") - 1)
-    #         ) .otherwise(None)
-    #     .alias("binned_result_years_count")
-    # ])
+    basic_features = basic_features.with_columns([
+        pl.when(pl.col("rank") <= 3)
+            .then((
+                pl.when(pl.col("rank") <= 3)
+                    .then(pl.struct(["name","year"])) .otherwise(None)
+                .n_unique().over("name") - 1)
+            ).when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
+            .then((
+                pl.when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
+                    .then(pl.struct(["name", "year"])) .otherwise(None)
+                .n_unique().over("name") - 1)
+            ).when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
+            .then((
+                pl.when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
+                    .then(pl.struct(["name", "year"])) .otherwise(None)
+                .n_unique().over("name") - 1)
+            ).when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
+            .then((
+                pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
+                    .then(pl.struct(["name", "year"])) .otherwise(None)
+                .n_unique().over("name") - 1)
+            ) 
+            .otherwise((
+                pl.when((pl.col("rank") > 25))
+                    .then(pl.struct(["name", "year"])) .otherwise(None)
+                .n_unique().over("name") - 1)
+            )
+        .alias("binned_result_years_count")
+    ])
+    basic_features = basic_features.with_columns([
+        pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+        .sum().over(["name", "year"]).alias("top25_count_year"),
+        pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+        .sum().over("name").alias("top25_count")
+    ]).with_columns(
+        (pl.col("date").rank("ordinal").over("name") - 1).alias("attended_races")
+    )
     return basic_features
     
 
@@ -480,6 +499,7 @@ def check_features_stats():
     features_df = pl.read_parquet("data/features_df.parquet")
 
     # Rider entries stats
+    print(features_df.fetch(5))
     rider_entries = features_df.group_by("name").agg(pl.len().alias("num_entries"))
     avg_entries = rider_entries.select(pl.col("num_entries").mean()).item()
     min_entries = rider_entries.select(pl.col("num_entries").min()).item()
@@ -513,7 +533,7 @@ def check_features_stats():
     
 
 if __name__ == "__main__":
-    # main()
+    main()
     # check_results_df()
     # check_races_df()
-    check_features_stats()
+    # check_features_stats()

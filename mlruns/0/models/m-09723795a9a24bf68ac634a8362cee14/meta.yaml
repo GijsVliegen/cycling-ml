@@ -1,0 +1,10 @@
+artifact_location: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/models/m-09723795a9a24bf68ac634a8362cee14/artifacts
+creation_timestamp: 1760616890283
+experiment_id: '0'
+last_updated_timestamp: 1760616894895
+model_id: m-09723795a9a24bf68ac634a8362cee14
+model_type: null
+name: model
+source_run_id: a15d8ec2fe2045baa26042e41f5919fd
+status: 2
+status_message: null

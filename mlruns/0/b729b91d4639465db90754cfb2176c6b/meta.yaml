@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/b729b91d4639465db90754cfb2176c6b/artifacts
+end_time: 1760564052842
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b729b91d4639465db90754cfb2176c6b
+run_name: righteous-bee-237
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760564019887
+status: 4
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/dbdf099c543c485db4d6985e6a889dfe/artifacts
+end_time: 1760620604691
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: dbdf099c543c485db4d6985e6a889dfe
+run_name: gaudy-ox-904
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760619695448
+status: 3
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/45f1ad241d0d48088155713dcf2678c5/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 45f1ad241d0d48088155713dcf2678c5
+run_name: loud-worm-423
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760566754642
+status: 1
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/c67b582c100c4732981cb3709d8bb905/artifacts
+end_time: 1760565487238
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c67b582c100c4732981cb3709d8bb905
+run_name: stately-pig-779
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760565041483
+status: 3
+tags: []
+user_id: gvliegen

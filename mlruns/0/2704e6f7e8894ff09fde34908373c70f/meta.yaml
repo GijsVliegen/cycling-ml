@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/2704e6f7e8894ff09fde34908373c70f/artifacts
+end_time: 1760563458271
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2704e6f7e8894ff09fde34908373c70f
+run_name: agreeable-gnat-742
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760563373866
+status: 4
+tags: []
+user_id: gvliegen

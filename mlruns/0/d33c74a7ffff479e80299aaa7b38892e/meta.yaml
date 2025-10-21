@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/d33c74a7ffff479e80299aaa7b38892e/artifacts
+end_time: 1760563125290
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: d33c74a7ffff479e80299aaa7b38892e
+run_name: rebellious-dog-411
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760543449380
+status: 3
+tags: []
+user_id: gvliegen

@@ -28,13 +28,23 @@ class WeightedNeighbourAggregator(nn.Module):
             nn.Softplus()
         )
 
-        self.feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
+        self.raw_feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
         self.optimizer = optim.Adam(self.parameters(), lr=0.01)
         self.history = []
 
+    @property
+    def feature_weights(self):
+        # apply softplus on-the-fly to ensure positivity
+        return torch.nn.functional.softmax(self.raw_feature_weights)
+    
+    # def baseline_history(self):
+    #     x = torch.linspace(2, 25, 100).unsqueeze(1) #not to high y values for plot readability
+    #     y_baseline = 1/x
+    #     return ("1/x", x.numpy().flatten(), y_baseline.numpy().flatten())
+
     def get_time_weights(self, center_date, neighbor_dates) -> torch.tensor:
         months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
-        decay_rate = 1/(365*2)
+        decay_rate = 1/(365*3)
         time_weights: np.array = np.exp( -1 * decay_rate * months_diff)
         return torch.from_numpy(time_weights)
 
@@ -65,12 +75,13 @@ class WeightedNeighbourAggregator(nn.Module):
         aggregated_score = torch.sum(weights * time_weights * neighbor_scores) / torch.sum(weights)
         if neighbor_scores.numel() == 0:
             breakpoint()
-        aggregated_score *= self.net(torch.tensor([neighbor_scores.numel()]).float())[0]
+        y = self.net(torch.tensor([neighbor_scores.numel()]).float())[0]
+        nr_top_races_penalty = torch.clamp(y, min=0.1, max=10.0)
+        aggregated_score *= nr_top_races_penalty
 
         return aggregated_score
     
     def step(self):
-        torch.nn.functional.softplus(self.feature_weights)
         self.optimizer.step()
 
     def zero_grad(self):
@@ -81,7 +92,8 @@ class WeightedNeighbourAggregator(nn.Module):
         x = torch.linspace(0, 25, 100).unsqueeze(1)
         with torch.no_grad():
             y = self.net(x)
-        self.history.append((epoch, x.numpy().flatten(), y.numpy().flatten()))
+            y_clamped = torch.clamp(y, min=0.1, max=10.0)
+        self.history.append((epoch, x.numpy().flatten(), y_clamped.numpy().flatten()))
 
     def plot_model(self):
         print(f"feature weights: {self.feature_weights}")
@@ -90,8 +102,10 @@ class WeightedNeighbourAggregator(nn.Module):
             x = torch.linspace(0, 25, 100).unsqueeze(1)
             with torch.no_grad():
                 y = self.net(x)
+                y_baseline = 1/x
             plt.figure()
-            plt.plot(x.numpy().flatten(), y.numpy().flatten())
+            plt.plot(x.numpy().flatten(), y.numpy().flatten(), label='Learned Function')
+            plt.plot(x.numpy().flatten(), y_baseline.numpy().flatten(), label='1/x Baseline', linestyle='--')
             plt.title(f'Learned Function for nr_of_neighbors')
             plt.xlabel(f'nr_of_neighbors')
             plt.ylabel('Output')
@@ -108,7 +122,7 @@ class NeuralNet(nn.Module):
     Simple neural network with one input and one output for scoring.
     """
 
-    def __init__(self, init_func: callable, lr: float = 0.01, nr_of_features = 1, correlated = False):
+    def __init__(self, init_func: callable, lr: float = 0.01, nr_of_features = 1, correlated = False, min_output: float = 0.0, max_output: float = 10.0):
         super().__init__()
         
         if nr_of_features == 1:
@@ -143,6 +157,8 @@ class NeuralNet(nn.Module):
 
         self.separate_inputs = nr_of_features > 2 and not correlated
         self.history = []
+        self.min_output = min_output
+        self.max_output = max_output
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         if self.separate_inputs:
@@ -155,7 +171,8 @@ class NeuralNet(nn.Module):
             return self.merge(m)
 
         else: 
-            return self.net(x)
+            y = self.net(x)
+            return torch.clamp(y, min=self.min_output, max=self.max_output)
 
     def step(self):
         torch.nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)
@@ -190,14 +207,14 @@ class RaceModel:
         """
         # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
         # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
-        # 10-11: age | rank_bucket | rank_normalized
+        # 10-11: age | rank_bucket | rank_normalized | age_normalized
 
         self.init_feature_funcs = self._init_feature_funcs(X)
 
         self.nr_riders_per_race = 5
 
-        self.feature_idxs = [9, 12]
-        self.feature_names = ["startlist_score", "rank_normalized"]
+        self.feature_idxs = [9, 12, 13]
+        self.feature_names = ["startlist_score", "rank_normalized", "age_normalized"]
         self.race_dist_idxs = [3, 4, 5]#, 6]
         self.race_dist_metrics = [
             # "distance_km",
@@ -213,14 +230,18 @@ class RaceModel:
         self.race_date_idx = 7
         self.lr_distance = 1e-4
 
+        mins = [0, 0.5]
+        maxs = [100, 10]
         self.feature_functions: list[NeuralNet] = [
             NeuralNet(
                 init_func = self.init_feature_funcs.get(feature_idx, lambda x:1),
                 lr = 0.01,
                 nr_of_features=1,
-                correlated=False
+                correlated=False,
+                min_output=0.1,
+                max_output=10.0
             )
-            for feature_idx in self.feature_idxs
+            for feature_idx, min, max in zip(self.feature_idxs, mins, maxs)
         ]
         # self.feature_functions = [torch.compile(f) for f in self.feature_functions]
         self.neighbor_aggregate_function = WeightedNeighbourAggregator(
@@ -304,7 +325,11 @@ class RaceModel:
         preferred_scores = scores[preferred_idxs]
         rejected_scores = scores[rejected_idxs]
         losses = self._pairwise_preference_loss(preferred_scores, rejected_scores)
-        return torch.sum(losses)
+        loss = torch.mean(losses)
+        #TODO: weighted sum, top-3 more important.
+        if loss.isnan():
+            breakpoint()
+        return loss
 
     def _step(self):
         for f in self.feature_functions:
@@ -352,26 +377,29 @@ class RaceModel:
             if len(indices) == 0:
                 neighbor_lists.append([])
                 continue
-            # Sort by rank (ascending, lower is better)
-            # ranks = X[indices, 8]
-            # sorted_order = np.argsort(ranks)
-            # top_indices = indices[sorted_order][:k]
-            # neighbor_lists.append(top_indices.tolist())
 
-            # Sort by date descending (most recent first)
-            dates = X["date"][indices]
-            sorted_order = np.argsort(dates)[::-1]  # descending
-            top_indices = indices[sorted_order][:min(len(indices), k)]
-            neighbor_lists.append(top_indices.tolist())
+            # if len(indices) > k:
+            #     # Sort by rank (ascending, lower is better)
+            #     ranks = X["rank"][indices]
+            #     sorted_order = np.argsort(ranks)
+            #     indices = indices[sorted_order][:k]
 
-            neighbor_lists.append(indices)
+            if len(indices) > k:
+                # Sort by date descending (most recent first)
+                dates = X["date"][indices]
+                sorted_order = np.argsort(dates)[::-1]  # descending
+                indices = indices[sorted_order][:k]
+
+            neighbor_lists.append(indices.tolist())
+
         return neighbor_lists
 
     def predict_ranking_for_race(
         self, 
         indices: List[int], 
         data: np.ndarray,
-        torch_data: torch.tensor
+        torch_data: torch.tensor,
+        nr_neighbors: int = 25
     ) -> torch.tensor:
         """
         Predicts scores for multiple riders in a race.
@@ -388,7 +416,7 @@ class RaceModel:
             all_data=data,
             torch_data=torch_data,
             rider_idxs=indices,
-            nr_neighbors=25
+            nr_neighbors=nr_neighbors
         )
         return Y_pred_scores
 
@@ -418,6 +446,8 @@ class RaceModel:
             data = data,
             torch_data = torch_data
         )
+        if Y_pred_scores.isnan().any():
+            breakpoint()
         loss = self._list_preference_loss(scores = Y_pred_scores, correct_order= Y_true_order, correct_ranking=Y_true_ranking)
 
         if loss.requires_grad:
@@ -443,7 +473,7 @@ class RaceModel:
         all_data: np.ndarray,
         torch_data: torch.tensor,
         rider_idxs: List[int],
-        nr_neighbors: int = 25,
+        nr_neighbors: int,
     ) -> torch.tensor:
         """
         Computes feature scores for k-nearest neighbors of multiple riders in a race.
@@ -483,17 +513,23 @@ class RaceModel:
 
         rider_scores = []
         offset = 0
+
+
+        center_date: np.array = all_data["date"][rider_idxs[0]]
+        center_race_features: torch.tensor = torch_data[rider_idxs[0]][self.race_dist_idxs]
         for i, rider_idx in enumerate(rider_idxs):
             count = rider_neighbor_counts[i]
             if count == 0:
                 rider_scores.append(torch.tensor(-10.0))
             else:
                 neigh_scores = neighbor_scores[offset:offset + count]
-                center_race_features: torch.tensor = torch_data[rider_idx][self.race_dist_idxs]
                 neighbor_race_features: torch.tensor = torch_data[all_neighbor_idxs[offset:offset + count]][:, self.race_dist_idxs]
-                center_date: np.array = all_data["date"][rider_idx]
                 neighbor_dates: np.array = all_data["date"][all_neighbor_idxs[offset:offset + count]]
 
+                #TODO somehow here somewhere still NaN possible
+                #TODO: if really wanted, some optimization possible since center_race_features same for all neighbors
+                if neigh_scores.isnan().any():
+                    breakpoint()
                 rider_score = self.neighbor_aggregate_function.forward(
                     center_race_features, 
                     neighbor_race_features, 
@@ -501,6 +537,8 @@ class RaceModel:
                     center_date, 
                     neighbor_dates
                 )
+                if rider_score.isnan().any():
+                    breakpoint()
                 rider_scores.append(rider_score)
             offset += count
 
@@ -518,7 +556,8 @@ class RaceModel:
                 axes = [axes]
             for i, ax in enumerate(axes):
                 if i == len(axes) -1: #last element
-                    for epoch, x_vals, y_vals in self.neighbor_aggregate_function.history:
+                    his = self.neighbor_aggregate_function.history
+                    for epoch, x_vals, y_vals in his[1:]: #skip first history
                         ax.plot(x_vals, y_vals, label=f'Epoch {epoch}')
                     ax.set_title('Learned Function for nr_of_neighbors')
                     ax.set_xlabel('nr_of_neighbors')
@@ -527,7 +566,7 @@ class RaceModel:
                     continue
 
                 f = self.feature_functions[i]
-                for epoch, x_vals, y_vals in f.history:
+                for epoch, x_vals, y_vals in f.history[1:]:
                     ax.plot(x_vals, y_vals, label=f'Epoch {epoch}')
                 ax.set_title(f'{self.feature_names[i]} Evolution')
                 ax.set_xlabel(f'{self.feature_names[i]}')
@@ -568,7 +607,7 @@ class MLflowWrapper(mlflow.pyfunc.PythonModel):
         # if len(rider_idxs) == 0:
         #     return {'riders': [], 'scores': []}
         
-        Y_pred_scores = self.model.predict_ranking_for_race(rider_idxs.tolist(), All)
+        Y_pred_scores = self.model.predict_ranking_for_race(rider_idxs.tolist(), All, nr_neighbors=25)
 
         return {'riders': rider_names, 'scores': Y_pred_scores.tolist()}
 
@@ -792,7 +831,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
         Y_pred_scores = model.predict_ranking_for_race(
             indices = random_rider_idxs,
             data = All,
-            torch_data = torch_data
+            torch_data = torch_data,
+            nr_neighbors=25
         )
         ra.append(ranking_accuracy(Y_pred_scores, Y_true_order))
         # sc.append(spearman_correlation(Y_pred_scores, Y_true_order))
