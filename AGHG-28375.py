@@ -46,7 +46,7 @@ be_hema_config = {
     ],
     "l_bounds": [0] * 12,
     "u_bounds": [
-        3, 4, 18, 1, 7, 1, 3, 4, 9, 1, 7, 1
+        3, 4, 9, 1, 7, 1, 3, 4, 9, 1, 7, 1
     ]
 }
 it_erl_config = {
@@ -134,13 +134,6 @@ lhs_samples = np.floor(lhs_samples).astype(int)
 
 
 # ------- add minimum and maximum edge cases -------
-lhs_samples_min = l_bounds_array
-lhs_samples_min_ones = lhs_samples_min + np.eye(dims, dtype=int)
-lhs_samples_min_ones = np.minimum(u_bounds_array_inclusive, lhs_samples_min_ones)
-lhs_samples_max = u_bounds_array_inclusive
-lhs_samples_max_ones = lhs_samples_max - np.eye(dims, dtype=int)
-lhs_samples_max_ones = np.maximum(l_bounds_array, lhs_samples_max_ones)
-lhs_samples = np.vstack((lhs_samples, lhs_samples_min, lhs_samples_min_ones, lhs_samples_max, lhs_samples_max_ones))
 lhs_samples = np.unique(lhs_samples, axis=0)
 
 #stats
@@ -158,20 +151,27 @@ print(f"total shift channel stddev = {total_shift:.6f}")
 # ----- wider spread -----------
 X_wide = sampler.random(n=1000)
 lhs_samples_wide = qmc.scale(X_wide, l_bounds_array, u_bounds_array_exclusive) 
+lhs_samples_min = l_bounds_array
+lhs_samples_min_ones = lhs_samples_min + np.eye(dims, dtype=int)
+lhs_samples_min_ones = np.minimum(u_bounds_array_inclusive, lhs_samples_min_ones)
+lhs_samples_max = u_bounds_array_inclusive
+lhs_samples_max_ones = lhs_samples_max - np.eye(dims, dtype=int)
+lhs_samples_max_ones = np.maximum(l_bounds_array, lhs_samples_max_ones)
 lhs_samples_lower = np.maximum(lhs_samples_wide - shifts, l_bounds_array)
 lhs_samples_upper = np.minimum(lhs_samples_wide + shifts, u_bounds_array_inclusive)
+lhs_samples_wide = np.vstack((lhs_samples_wide, lhs_samples_min, lhs_samples_min_ones, lhs_samples_max, lhs_samples_max_ones))
 lhs_samples_wide = np.vstack((lhs_samples_wide, lhs_samples_lower, lhs_samples_upper))
 lhs_samples_wide = np.floor(lhs_samples_wide).astype(int)
-lhs_samples_wide_u = np.unique(lhs_samples_wide, axis=0)
+lhs_samples_wide = np.unique(lhs_samples_wide, axis=0)
+
 
 # Plot distributions
 plt.figure(figsize=(10, 5))
 plt.hist(lhs_samples.sum(axis=1), bins=range(0, max_total + 2), alpha=0.5, label='Uniform')
 plt.hist(lhs_samples_wide.sum(axis=1), bins=range(0, max_total + 2), alpha=0.5, label='Uniform')
-plt.hist(lhs_samples_wide_u.sum(axis=1), bins=range(0, max_total + 2), alpha=0.5, label='Uniform')
 plt.xlabel('Sum of samples')
 plt.ylabel('Frequency')
-plt.title('Distribution of sums for uniform and skewed samples')
+plt.title('Distribution of summed samples')
 plt.legend()
 plt.show()
 
@@ -181,7 +181,6 @@ for i in range(dims):
     ax = axes[i // 4, i % 4]
     ax.hist(lhs_samples[:, i], bins=range(l_bounds_array[i], u_bounds_array_exclusive[i] + 1), alpha=0.5, label='lhs_samples')
     ax.hist(lhs_samples_wide[:, i], bins=range(l_bounds_array[i], u_bounds_array_exclusive[i] + 1), alpha=0.5, label='lhs_samples_wide')
-    ax.hist(lhs_samples_wide_u[:, i], bins=range(l_bounds_array[i], u_bounds_array_exclusive[i] + 1), alpha=0.5, label='lhs_samples_wide_u')
     ax.set_title(config["channels"][i])
     ax.set_xlabel('Value')
     ax.set_ylabel('Frequency')

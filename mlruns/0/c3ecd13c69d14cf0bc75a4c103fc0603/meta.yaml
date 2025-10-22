@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/c3ecd13c69d14cf0bc75a4c103fc0603/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: c3ecd13c69d14cf0bc75a4c103fc0603
+run_name: charming-croc-602
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1761125538240
+status: 1
+tags: []
+user_id: gvliegen

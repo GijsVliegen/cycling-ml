@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/8e1e3b38fd6e4984894145f94cecacaa/artifacts
+end_time: 1761164054031
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 8e1e3b38fd6e4984894145f94cecacaa
+run_name: gifted-cod-821
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1761164054018
+status: 4
+tags: []
+user_id: gvliegen

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/gvliegen/personal/code/cycling%20data%20model/mlruns/0/9f7c20c83755435a804f208b7e6edbbf/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 9f7c20c83755435a804f208b7e6edbbf
+run_name: dazzling-duck-59
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1761051148346
+status: 1
+tags: []
+user_id: gvliegen

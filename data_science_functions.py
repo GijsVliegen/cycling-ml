@@ -155,8 +155,8 @@ def score(rider: pl.DataFrame, race: pl.DataFrame, normalized_races_df: pl.DataF
                 pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25)) 
                     .then(pl.struct(["name", "year"])) .otherwise(None)
                 .n_unique().over("name") - 1) 
-            ) .otherwise(None)
-        .alias("binned_result_years_count") 
+            ) .otherwise(-1)
+        .alias("rank_bucket_year_count") 
     ])
 
     ## TODO: add extra score for streaking wins in a season and every season continously, favoring a longer career of wins over a shorter one
@@ -190,7 +190,7 @@ def score(rider: pl.DataFrame, race: pl.DataFrame, normalized_races_df: pl.DataF
             (1 / pl.col("rank"))
             * (1 / (pl.col("race_similarity_distance") + 1)) #inverse for race similarity a good idea? 
             * (1 + pl.col("startlist_score")) #startlist score is between 0 and 1, so this adds between 1 and 2 factor
-            / (pl.col("binned_result_years_count") ** 0.5 + 1) #weigh down by sqrt of number of results in that bin, to avoid overrating high nr of races and lots of low top 25 results
+            / (pl.col("rank_bucket_year_count") ** 0.5 + 1) #weigh down by sqrt of number of results in that bin, to avoid overrating high nr of races and lots of low top 25 results
             # * (1 + pl.col("top25_years") / 10) #favorr riders with more years in top 25
         ) .otherwise(0)
         .sum().alias("score"),
@@ -399,7 +399,7 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
                     .then(pl.struct(["name", "year"])) .otherwise(None)
                 .n_unique().over("name") - 1)
             )
-        .alias("binned_result_years_count")
+        .alias("rank_bucket_year_count")
     ])
     basic_features = basic_features.with_columns([
         pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
@@ -409,6 +409,18 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
     ]).with_columns(
         (pl.col("date").rank("ordinal").over("name") - 1).alias("attended_races")
     )
+
+    nr_riders = basic_features.group_by(
+        "race_id"
+    ).agg(
+        pl.col("name").count().alias("nr_riders")
+    )
+    basic_features = basic_features.join(
+        nr_riders,
+        on="race_id",
+        how="left"
+    )
+
     return basic_features
     
 
