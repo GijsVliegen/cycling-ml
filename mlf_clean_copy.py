@@ -16,31 +16,41 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 class WeightedNeighbourAggregator(nn.Module):
-    def __init__(self, nr_of_features: int):
-
-
-
+        # self.distance_weights = np.full(
+        #     len(self.race_dist_idxs),  #length
+        #     1/len(self.race_dist_idxs) #init weights
+        # )
+    def __init__(self, lr: int, nr_of_dist_features: int):
         super().__init__()
-        self.net = nn.Sequential( #nr_neighbor_aggregator_net
-            nn.Linear(1, 16),
+        
+        self.race_dist_pair_nets = [
+            nn.Sequential(
+                nn.Linear(2, 16),
+                nn.ReLU(),
+                nn.Linear(16, 8),
+                nn.ReLU()
+            )
+            for _ in range(nr_of_dist_features)
+        ]
+        # Combined layers after aggregating pairs
+        self.race_dist_merge_net = nn.Sequential(
+            nn.Linear(8 * nr_of_dist_features, 8),
             nn.ReLU(),
-            nn.Linear(16, 1),
-            nn.Softplus()
+            nn.Linear(8, 1)
+            # nn.Softplus()  # optional if you want strictly positive outputs
         )
 
-        self.raw_feature_weights = nn.Parameter(torch.ones(nr_of_features) / nr_of_features)
-        self.optimizer = optim.Adam(self.parameters(), lr=0.01)
-        self.history = []
+        self.time_weights_net = nn.Sequential( #input time_diff, rider_age, nr_of_races
+            nn.Linear(3, 8),
+            nn.ReLU(),
+            nn.Linear(8, 4),
+            nn.ReLU(),
+            nn.Linear(4, 1),
+            # nn.Softplus()
+        )
+        self.optimizer = optim.Adam(self.parameters(), lr=lr)
 
-    @property
-    def feature_weights(self):
-        # apply softplus on-the-fly to ensure positivity
-        return torch.nn.functional.softmax(self.raw_feature_weights)
-    
-    # def baseline_history(self):
-    #     x = torch.linspace(2, 25, 100).unsqueeze(1) #not to high y values for plot readability
-    #     y_baseline = 1/x
-    #     return ("1/x", x.numpy().flatten(), y_baseline.numpy().flatten())
+
 
     def get_time_weights(self, center_date, neighbor_dates) -> torch.tensor:
         months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
@@ -48,13 +58,49 @@ class WeightedNeighbourAggregator(nn.Module):
         time_weights: np.array = np.exp( -1 * decay_rate * months_diff)
         return torch.from_numpy(time_weights)
 
+    def race_dist_forward(  
+        self, 
+        relative_features: torch.tensor, 
+        center_features: torch.tensor,
+    ) -> torch.tensor:
+        
+
+            # x = x.view(-1, x.shape[-1]) 
+            # m1 = self.f1(x[:, 0:1])
+            # m2 = self.f2(x[:, 1:2])
+            # m = torch.cat((m1, m2), dim=1)
+            # return self.merge(m)
+
+        """pairs relative features with center features and goes through the network"""
+        center_expanded = center_features.unsqueeze(0).expand(relative_features.shape[0], -1)
+        paired_features = torch.cat([relative_features, center_expanded], dim=1)
+
+        paired_features = torch.hstack([
+            self.race_dist_pair_nets[i](paired_features[:, 2*i:2*i+2])
+            for i in range(len(self.race_dist_pair_nets))
+        ])
+        return self.race_dist_merge_net(paired_features)
+
+    def time_dist_forward(
+        self, 
+        center_date, 
+        neighbor_dates,
+        ages: torch.tensor,
+        rider_neighbor_counts: torch.tensor,
+    ) -> torch.tensor:
+        months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
+        months_diff = torch.from_numpy(months_diff).unsqueeze(1).float()
+        return self.time_weights_net(
+            torch.hstack([months_diff, ages, rider_neighbor_counts])
+        )
+
     def forward(
         self, 
         center_features, 
         neighbor_features, 
-        neighbor_scores,
-        center_date,
-        neighbor_dates
+        center_date, 
+        neighbor_dates, #N
+        rider_neighbor_counts: List[int]
     ):
         """
         center_features: [nr_of_features]
@@ -62,24 +108,32 @@ class WeightedNeighbourAggregator(nn.Module):
         neighbor_scores: [N] 
         """
         # Compute distances from center to each neighbor with learnable weights
-        diff = center_features - neighbor_features  # [N, D]
-        weighted_diff = (diff ** 2) * self.feature_weights  # [N, D]
-        dist = torch.sqrt(weighted_diff.sum(dim=-1) + 1e-8)  # [N]
-        weights = torch.exp(-dist)  # [N]
-        time_weights = self.get_time_weights(
+        relative_features = neighbor_features - center_features  # [N, D]
+        
+        
+        # relative_features = torch.hstack([relative_features, nr_top_races])
+        relative_weights = self.race_dist_forward(
+            relative_features = relative_features,
+            center_features = center_features
+        )  # [N, 1]
+
+
+        rider_neighbor_counts_extended = []
+        for v in rider_neighbor_counts:
+            rider_neighbor_counts_extended.extend([v] * v)
+
+        rider_neighbor_counts = torch.tensor(rider_neighbor_counts_extended).unsqueeze(1).float()  # [N, 1]
+
+        #TODO: age
+        ages = torch.ones_like(rider_neighbor_counts) * 30.0  # [N, 1], placeholder age 30
+
+        time_weights = self.time_dist_forward(
             center_date=center_date,
             neighbor_dates=neighbor_dates,
+            ages=ages,
+            rider_neighbor_counts=rider_neighbor_counts
         )
-
-        # Aggregate neighbor scores as weighted average
-        aggregated_score = torch.sum(weights * time_weights * neighbor_scores) / torch.sum(weights)
-        if neighbor_scores.numel() == 0:
-            breakpoint()
-        y = self.net(torch.tensor([neighbor_scores.numel()]).float())[0]
-        nr_top_races_penalty = torch.clamp(y, min=0.1, max=10.0)
-        aggregated_score *= nr_top_races_penalty
-
-        return aggregated_score
+        return relative_weights * time_weights  # [N, 1]
     
     def step(self):
         self.optimizer.step()
@@ -183,31 +237,25 @@ class RaceModel:
         self.feature_idxs = [9, 12, 13, 15, 16, 17]
         self.feature_names = ["startlist_score", "rank_normalized", "age_normalized"]
         self.race_dist_idxs = [2, 3, 4, 5]#, 6]
-        self.race_dist_metrics = [
+        self.race_dist_metrics = [ 
             "distance_km",
             "elevation",
             "profile_score",
             "profile_score_last_25k",
             # "classification"
         ]
-        self.distance_weights = np.full(
-            len(self.race_dist_idxs),  #length
-            1/len(self.race_dist_idxs) #init weights
-        )
         self.race_date_idx = 7
         self.lr_distance = 1e-4
 
-        mins = [0, 0.5]
-        maxs = [100, 10]
         self.features_function: BigNN = BigNN(
             lr = 0.01,
             nr_of_features=len(self.feature_idxs),
         )
-        self.neighbor_aggregate_function = WeightedNeighbourAggregator(
-            nr_of_features=len(self.race_dist_idxs)
+        self.relative_features_function: WeightedNeighbourAggregator = WeightedNeighbourAggregator(
+            lr = 0.01,
+            nr_of_dist_features=len(self.race_dist_idxs)
         )
 
-    
     def _init_feature_funcs(self, X: np.ndarray) -> Dict[int, Callable]:
         """
         Initializes feature-specific spline functions based on data statistics.
@@ -294,13 +342,13 @@ class RaceModel:
         # for f in self.feature_functions:
         #     f.step()
         self.features_function.step()
-        self.neighbor_aggregate_function.step()
+        self.relative_features_function.step()
 
     def _zero_grad(self):
         # for f in self.feature_functions:
         #     f.zero_grad()
         self.features_function.zero_grad()
-        self.neighbor_aggregate_function.zero_grad()
+        self.relative_features_function.step()
 
     def _get_closest_points_batch(self, X: np.ndarray, rider_idxs: List[int], k: int) -> List[List[int]]:
         """
@@ -318,13 +366,6 @@ class RaceModel:
         n_riders = len(rider_idxs)
         n_data = X.shape[0]
 
-        # Vectorized masking using broadcasting
-        # mask = (
-        #     (rider_data[:, None, 0] == X[None, :, 0]) &  # same name
-        #     (rider_data[:, None, 1] != X[None, :, 1]) &  # different race
-        #     (X[None, :, 6] <= rider_data[:, None, 6]) &  # earlier or same date
-        #     ((X[:, 8]) <= 25) #rank top-25
-        # )
         mask = (
             (rider_data['name'][:, None] == X['name'][None, :]) &       # same rider
             (rider_data['race_id'][:, None] != X['race_id'][None, :]) &   # different race
@@ -344,12 +385,6 @@ class RaceModel:
                 ranks = X["rank"][indices]
                 sorted_order = np.argsort(ranks)
                 indices = indices[sorted_order][:k]
-
-            # if len(indices) > k:
-            #     # Sort by date descending (most recent first)
-            #     dates = X["date"][indices]
-            #     sorted_order = np.argsort(dates)[::-1]  # descending
-            #     indices = indices[sorted_order][:k]
 
             neighbor_lists.append(indices.tolist())
 
@@ -450,48 +485,38 @@ class RaceModel:
         all_neighbor_idxs = [idx for sublist in neighbor_lists for idx in sublist]
         rider_neighbor_counts = [len(sublist) for sublist in neighbor_lists]
 
-
         neighbor_data = torch_data[all_neighbor_idxs]
 
         neighbor_scores: torch.tensor = self.features_function.forward(
             neighbor_data[:, self.feature_idxs]
         ).squeeze(-1) 
-        
-        #TODO: squeeze needed?
 
+        neighbor_weights: torch.tensor = self.relative_features_function.forward(
+            center_features = torch_data[rider_idxs[0]][self.race_dist_idxs], 
+            neighbor_features = torch_data[all_neighbor_idxs][:, self.race_dist_idxs], 
+            center_date = all_data["date"][rider_idxs[0]], 
+            neighbor_dates = all_data["date"][all_neighbor_idxs],
+            rider_neighbor_counts = rider_neighbor_counts
+        ).squeeze(-1)
+    
         rider_scores = []
         offset = 0
 
-
-        center_date: np.array = all_data["date"][rider_idxs[0]]
-        center_race_features: torch.tensor = torch_data[rider_idxs[0]][self.race_dist_idxs]
         for i, rider_idx in enumerate(rider_idxs):
             count = rider_neighbor_counts[i]
             if count == 0:
                 rider_scores.append(torch.tensor(0))
             else:
                 neigh_scores = neighbor_scores[offset:offset + count]
-                neighbor_race_features: torch.tensor = torch_data[all_neighbor_idxs[offset:offset + count]][:, self.race_dist_idxs]
-                neighbor_dates: np.array = all_data["date"][all_neighbor_idxs[offset:offset + count]]
+                neigh_weights = neighbor_weights[offset:offset + count]
 
-                if neigh_scores.isnan().any():
+                if neigh_scores.isnan().any() or neigh_weights.isnan().any():
                     breakpoint()
-                rider_score = self.neighbor_aggregate_function.forward(
-                    center_race_features, 
-                    neighbor_race_features, 
-                    neigh_scores,
-                    center_date, 
-                    neighbor_dates
-                )
-                if rider_score.isnan().any():
-                    breakpoint()
+                rider_score = torch.sum(neigh_weights * neigh_scores)
                 rider_scores.append(rider_score)
             offset += count
 
         return torch.stack(rider_scores)
-
-    def normalize_distance_weights(self):
-        self.neighbor_aggregate_function.normalize_weights()
 
     def plot_all_learned_functions(self):
 
@@ -503,15 +528,6 @@ class RaceModel:
         #     if len(self.feature_functions) == 1:
         #         axes = [axes]
         #     for i, ax in enumerate(axes):
-        #         if i == len(axes) -1: #last element
-        #             his = self.neighbor_aggregate_function.history
-        #             for epoch, x_vals, y_vals in his[1:]: #skip first history
-        #                 ax.plot(x_vals, y_vals, label=f'Epoch {epoch}')
-        #             ax.set_title('Learned Function for nr_of_neighbors')
-        #             ax.set_xlabel('nr_of_neighbors')
-        #             ax.set_ylabel('Output')
-        #             ax.legend()
-        #             continue
 
         #         f = self.feature_functions[i]
         #         for epoch, x_vals, y_vals in f.history[1:]:
@@ -520,14 +536,7 @@ class RaceModel:
         #         ax.set_xlabel(f'{self.feature_names[i]}')
         #         ax.set_ylabel('Output')
         #         ax.legend()
-
-        # Plot neighbor aggregate weights history
-        plt.title('Neighbor Aggregate Weights Evolution')
-        plt.xlabel('Epoch')
-        plt.ylabel('Weight Value')
-        plt.legend()
-        plt.show()
-
+        pass
 
 def polars_to_structured_array(df: pl.DataFrame, max_str_len=64):
     """
@@ -666,11 +675,9 @@ def train_model(All: np.ndarray, X: np.ndarray, model: RaceModel, torch_data: to
             #     f.save_function(epoch)
             #TODO: combine in self.snapshot_model()
             #TODO: add for model.features_function
-            model.neighbor_aggregate_function.save_function(epoch)
             print(f"Epoch {epoch}, Loss: {total_loss}")
-            print(f"Feature weights: {model.neighbor_aggregate_function.feature_weights}")
             total_loss = 0
-            model.normalize_distance_weights()
+            # model.normalize_distance_weights()
 
     training_time = time() - start_time
     print(f"training time (s) = {training_time}")
