@@ -122,18 +122,20 @@ class BigNN(nn.Module):
         super().__init__()
         
         self.net = nn.Sequential(
-            nn.Linear(nr_of_features, 16 * nr_of_features),
+            nn.Linear(nr_of_features, 8 * nr_of_features),
             nn.ReLU(),
-            nn.Linear(16 * nr_of_features, 32 * nr_of_features),
+            nn.Linear(8 * nr_of_features, 16 * nr_of_features),
             nn.ReLU(),
-            nn.Linear(32 * nr_of_features, 8 * nr_of_features),
+            nn.Linear(16 * nr_of_features, 8 * nr_of_features),
             nn.ReLU(),
             nn.Linear(8 * nr_of_features, 8),
             nn.ReLU(),
             nn.Linear(8, 1),
-            nn.Softplus()
+            # nn.Softplus() #reason of low outputs after training?
         )
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
+
+        #TODO: check weight initialization
 
     def forward(self, x: torch.tensor) -> torch.tensor:
         return self.net(x)
@@ -621,7 +623,7 @@ def get_random_riders(All: np.ndarray, race_id: Any, min_nr: int = 6, min_rank =
         (All["race_id"] == race_id) & (All["rank"] > All["nr_riders"] * distribution["bottom"])
     )[0] #bottom results
     
-    top = min(min_nr * distribution["top"], len(bottom_rider_idxs))
+    top = min(min_nr * distribution["top"], len(top_rider_idxs))
     bottom = min(min_nr * distribution["bottom"], len(bottom_rider_idxs))
                  
     return np.concatenate((
@@ -675,6 +677,15 @@ def train_model(All: np.ndarray, X: np.ndarray, model: RaceModel, torch_data: to
     # TODO: fix model.plot_all_learned_functions()
     return training_time
 
+def predict_loss_diff_after_one_training_step(steps: int = 100) -> None:
+    """
+    Tests loss difference before and after one training step.
+    
+    and prints difference
+    """
+
+    
+
 def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, torch_data: torch.tensor) -> Dict[str, float]:
     """
     Evaluates model performance on test races.
@@ -689,10 +700,8 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
     """
 
     race_ids = np.unique(Y["race_id"])
-    test_size = len(race_ids)
+    test_size = 50#len(race_ids)
     test_race_ids = np.random.choice(race_ids, size = test_size, replace = False)
-
-    nr_riders_per_race = 100
 
     from scipy.stats import spearmanr
     from scipy.stats import kendalltau
@@ -734,16 +743,21 @@ def compute_model_performance(All: np.ndarray, Y: np.ndarray, model: RaceModel, 
     ra = []
     sc = []
     kt = []
-    for test_race in test_race_ids:
-        random_rider_idxs = get_random_riders(All, test_race, nr_riders_per_race)
+    for test_id in test_race_ids:
+        #Yeet
+        nr_riders_per_race = 25
+        top_25_rider_idxs = np.where(
+            (All["race_id"] == test_id) & (All["rank"] <= nr_riders_per_race)
+        )[0]
+
 
         # if len(random_rider_idxs) < nr_riders_per_race:
         #     continue
 
-        Y_true_ranking = All["rank"][random_rider_idxs]
+        Y_true_ranking = All["rank"][top_25_rider_idxs]
         Y_true_order = np.argsort(np.argsort(Y_true_ranking))
         Y_pred_scores = model.predict_ranking_for_race(
-            indices = random_rider_idxs,
+            indices = top_25_rider_idxs,
             data = All,
             torch_data = torch_data,
             nr_neighbors=25
@@ -773,6 +787,51 @@ def to_torch_data(np_data: np.ndarray) -> torch.tensor:
             torch_data[:, i] = 0.0
     return torch.from_numpy(torch_data).float()
 
+def get_RVV_2024_id():
+    name = "Ronde-Van-Vlaanderen"
+    year = "2024"
+    races = pl.read_parquet("data/races_df.parquet")
+    race_id = races.filter(
+        (pl.col("name").str.contains("vlaanderen")) & (pl.col("year") == year)
+    ).select("race_id").to_numpy()[0][0]
+    return race_id
+
+def test_prediction(model: RaceModel, All: np.ndarray, torch_data: torch.tensor):
+    rvv_id = get_RVV_2024_id()
+    # rider_idxs = get_random_riders(All, rvv_id, min_nr=100, min_rank=100)
+    ranks_to_consider = 100
+    rider_idxs = np.where(
+        (All["race_id"] == rvv_id) & (All["rank"] <= ranks_to_consider)
+    )[0]
+
+    Y_pred_scores = model.predict_ranking_for_race(
+        indices = rider_idxs,
+        data = All,
+        torch_data = torch_data,
+        nr_neighbors=25
+    )
+    predicted_ranks = torch.argsort(Y_pred_scores, descending=True)
+    real_ranks = All["rank"][rider_idxs]
+    print("Predicted ranking for RVV 2024:")
+    # for rank, idx in enumerate(sorted_indices)[:25]:  #top 25
+    #     rider_idx = rider_idxs[idx]
+    #     rider_name = All["name"][rider_idx]
+    #     rider_score = Y_pred_scores[idx].item()
+    #     print(f"Rank {rank + 1}: {rider_name} (Score: {rider_score:.4f})")
+
+    
+    #only print top 25 real ranks
+    sorted_indices_on_real_rank = np.argsort(real_ranks)
+    for i in sorted_indices_on_real_rank[:25]:
+        real_rank = real_ranks[i]
+        rider_idx = rider_idxs[i]
+        rider_name = All["name"][rider_idx]
+        predicted_rank = predicted_ranks[i]
+
+        rider_score = Y_pred_scores[i].item()
+        print(f"{real_rank}: {rider_name}, predicted rank = {predicted_rank} (Score: {rider_score:.4f})")
+
+
 def main() -> None:
 
     #TODO: generate test data
@@ -790,14 +849,14 @@ def main() -> None:
 
     training_time = train_model(All, X_Y[0], neural_net, torch_data=torch_data)
 
-    model_perf_dict = compute_model_performance(
-        All, X_Y[1], model=neural_net, torch_data=torch_data
-    ) | {
-        "training_time_seconds": training_time
-    }
+    # model_perf_dict = compute_model_performance(
+    #     All, X_Y[1], model=neural_net, torch_data=torch_data
+    # ) | {
+    #     "training_time_seconds": training_time
+    # }
+    # print("Model performance on test set:", model_perf_dict)
 
-    print("Model performance on test set:", model_perf_dict)
-
+    test_prediction(neural_net, All, torch_data=torch_data)
 
 if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
