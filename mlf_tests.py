@@ -4,6 +4,7 @@ import torch
 
 from mlf_clean_copy import split_train_test, to_torch_data, RaceModel, get_random_riders
 
+
 def test_random_riders(model):
     race_data = ...#TODO. init structured array
     random_race_id = 1
