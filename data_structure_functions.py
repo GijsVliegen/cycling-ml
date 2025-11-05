@@ -5,7 +5,9 @@ import re
 import asyncio
 import rbo
 import itertools
+import httpx
 from data_cleaning_functions import get_all_results, get_results_one_race
+from web_scraping_functions import fetch_all_riders
 
 
 
@@ -59,20 +61,28 @@ def transform_race_data(races_data: list[dict]) -> pl.DataFrame:
     return results_df, races_df
 
 
+
 async def make_data_structure():
     """
     Transforms raw data into structured polars Dataframes and persists these
     """
     current_results = pl.read_parquet("data/results_df.parquet")
     current_races = pl.read_parquet("data/races_df.parquet")
-    all_results = await get_all_results(k=-1)
-    results_df, races_df = transform_race_data(all_results)
-    print(results_df)
-    print(races_df)
-    combined_results_df = pl.concat([current_results, results_df]).unique(subset=["name", "race_id"])
-    combined_results_df.write_parquet("data/results_df.parquet")
-    combined_races = pl.concat([current_races, races_df]).unique(subset=["race_id"])
-    combined_races.write_parquet("data/races_df.parquet")
+    # all_results = await get_all_results(k=-1)
+    # results_df, races_df = transform_race_data(all_results)
+    # print(results_df)
+    # print(races_df)
+    # combined_results_df = pl.concat([current_results, results_df]).unique(subset=["name", "race_id"])
+    # combined_results_df.write_parquet("data/results_df.parquet")
+    # combined_races = pl.concat([current_races, races_df]).unique(subset=["race_id"])
+    # combined_races.write_parquet("data/races_df.parquet")
+
+    # Scrape additional rider data
+    unique_riders = current_results.select("name").unique()["name"].to_list()
+    rider_data = await fetch_all_riders(unique_riders)
+    rider_df = pl.DataFrame(rider_data)
+    breakpoint()
+    rider_df.write_parquet("data/rider_data.parquet")
 
 async def test_data_structure(race_url):
 

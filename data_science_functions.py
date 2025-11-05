@@ -409,6 +409,9 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
     ]).with_columns(
         (pl.col("date").rank("ordinal").over("name") - 1).alias("attended_races")
     )
+    basic_features = basic_features.with_columns(
+        pl.col("classification").cast(pl.Categorical).to_physical().alias("classification_encoded")
+    )
 
     nr_riders = basic_features.group_by(
         "race_id"
@@ -496,6 +499,7 @@ def main():
     normalized_races_df = normalize_race_data(races_df=filled_out_races_df)
     print(filled_out_races_df)
 
+
     # normalized_races_df = normalize_race_data(races_df=races_df)
     # normalized_races_df.write_parquet("data/normalized_races_df.parquet")
 
@@ -533,19 +537,35 @@ def check_features_stats():
     # Riders per race
     riders_per_race = features_df.group_by('race_id').agg(pl.
     col('name').n_unique().alias('num_riders'))
-    min_riders = riders_per_race.select(pl.col('num_riders').
-    min()).item()
+    min_riders = riders_per_race.select(
+        pl.col('num_riders').min()
+    ).item()
     max_riders = riders_per_race.select(pl.col('num_riders').
-    max()).item()
+        max()).item()
     mean_riders = riders_per_race.select(pl.
     col('num_riders').mean()).item()
     print(f'Min riders per race: {min_riders}')
     print(f'Max riders per race: {max_riders}')
     print(f'Mean riders per race: {mean_riders:.2f}')
+
+def clean_rider_stats():
+    """Cleans some of the cols of rider data.
     
+    Cols:
+    - classification: to ordinal values
+    
+    """
+    pass
+    # rider_df = pl.read_parquet("data/rider_data.parquet")
+    # rider_df.write_parquet("data/rider_data.parquet")
+
+def check_rider_stats():
+    rider_df = pl.read_parquet("data/rider_data.parquet")
+    print(rider_df)
 
 if __name__ == "__main__":
     main()
     # check_results_df()
     # check_races_df()
     # check_features_stats()
+    check_rider_stats()

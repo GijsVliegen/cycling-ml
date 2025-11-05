@@ -24,10 +24,6 @@ max_rank_test = 25
 # max_rank_loss = 10
 
 class WeightedNeighbourAggregator(nn.Module):
-        # self.distance_weights = np.full(
-        #     len(self.race_dist_idxs),  #length
-        #     1/len(self.race_dist_idxs) #init weights
-        # )
     def __init__(self, lr: int, nr_of_dist_features: int):
         super().__init__()
         
@@ -58,26 +54,11 @@ class WeightedNeighbourAggregator(nn.Module):
         )
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
 
-
-
-    def get_time_weights(self, center_date, neighbor_dates) -> torch.tensor:
-        months_diff = (center_date - neighbor_dates) / np.timedelta64(1, 'D')
-        decay_rate = 1/(365*3)
-        time_weights: np.array = np.exp( -1 * decay_rate * months_diff)
-        return torch.from_numpy(time_weights)
-
     def race_dist_forward(  
         self, 
         relative_features: torch.tensor, 
         center_features: torch.tensor,
     ) -> torch.tensor:
-        
-
-            # x = x.view(-1, x.shape[-1]) 
-            # m1 = self.f1(x[:, 0:1])
-            # m2 = self.f2(x[:, 1:2])
-            # m = torch.cat((m1, m2), dim=1)
-            # return self.merge(m)
 
         """pairs relative features with center features and goes through the network"""
         center_expanded = center_features.unsqueeze(0).expand(relative_features.shape[0], -1)
@@ -235,11 +216,12 @@ class RaceModel:
         # 0-4: name  ┆ race_id ┆ distance_km ┆ elevation_m ┆ profile_score ┆ 
         # 5-9: profile_score_last_25k ┆ classification ┆ date ┆ rank  ┆ startlist_score ┆ 
         # 10-14: age | rank_bucket | rank_normalized | age_normalized | year
-        # 15-18: rank_bucket_year_count | top25_count_year | top25_count | attended_races
+        # 15-19: rank_bucket_year_count | top25_count_year | top25_count | attended_races | classification_encoded
+        # 20-24: nr_riders
 
         self.feature_idxs = [9, 12, 13, 15, 16, 17]
         self.feature_names = ["startlist_score", "rank_normalized", "age_normalized"]
-        self.race_dist_idxs = [2, 3, 4, 5]#, 6]
+        self.race_dist_idxs = [2, 3, 4, 5, 19]#, 6]
         self.race_dist_metrics = [ 
             "distance_km",
             "elevation",
@@ -263,7 +245,7 @@ class RaceModel:
 
     def _get_pairs(self, correct_order: np.array, correct_ranking: np.array):
         """According to chatgpt very fast"""
-        """only return pairs for which one result was top 25"""
+        """only return pairs for which one result was top"""
 
         nr_of_top = np.sum(correct_ranking <= max_rank_training)
         N = len(correct_order)
@@ -322,7 +304,7 @@ class RaceModel:
             (rider_data['name'][:, None] == X['name'][None, :]) &       # same rider
             (rider_data['race_id'][:, None] != X['race_id'][None, :]) &   # different race
             (X['date'][None, :] <= rider_data['date'][:, None]) &         # earlier or same date
-            (X['rank'][None, :] <= max_rank_neighbor)                                    # rank top-25 #TODO: parameterize, should be same as bucket count yearly definition in data_science_functions.py
+            (X['rank'][None, :] <= max_rank_neighbor)                                   
         )
 
         neighbor_lists = []
@@ -459,7 +441,7 @@ class RaceModel:
 
                 if neigh_scores.isnan().any() or neigh_weights.isnan().any():
                     breakpoint()
-                rider_score = torch.sum(neigh_weights * neigh_scores) / count
+                rider_score = torch.mean(neigh_weights * neigh_scores) / count
                 rider_scores.append(rider_score)
             offset += count
 
@@ -597,7 +579,7 @@ def train_model(All: np.ndarray, X: np.ndarray, model: RaceModel, torch_data: to
         X: Training subset.
         spline_model: Model instance to train.
     """
-    epochs = 200
+    epochs = 2000
     total_loss = 0
 
     start_time = time()
@@ -760,7 +742,7 @@ def test_prediction(model: RaceModel, All: np.ndarray, torch_data: torch.tensor)
         data = All,
         torch_data = torch_data
     )
-    predicted_ranks = torch.argsort(Y_pred_scores, descending=True)
+    predicted_ranks = torch.argsort(torch.argsort(-Y_pred_scores))
     real_ranks = All["rank"][rider_idxs]
     print("Predicted ranking for RVV 2024:")
 

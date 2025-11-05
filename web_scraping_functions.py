@@ -265,6 +265,64 @@ def parse_race_page(html, profile_html, race_url) -> dict:
     }
 
 
+async def scrape_rider_data(client, rider_name):
+    """
+    Scrape data for a single rider.
+
+    input: rider_name as in url 'rider/{rider_name}'
+    output: list of dicts with rider data per year
+    """
+    url = f"{BASE_URL}/rider/{rider_name}"
+    resp = await client.get(url)
+    if resp.status_code >= 300:
+        breakpoint()
+    
+    soup = BeautifulSoup(resp.text, "lxml")
+    # Specialties
+    specialties = {}
+    ul = soup.find("ul", class_="pps list")
+    if ul:
+        for li in ul.find_all("li"):
+            xtitle = li.find("div", class_="xtitle")
+            xvalue = li.find("div", class_="xvalue")
+            if xtitle and xvalue:
+                spec = xtitle.get_text(strip=True)
+                score = int(xvalue.get_text(strip=True))
+                specialties[spec] = score
+
+    # Rankings
+    rankings = {}
+    h4 = soup.find("h4", string="PCS Ranking position per season")
+    if h4:
+        table = h4.find_next("table")
+        if table:
+            tbody = table.find("tbody")
+            for tr in tbody.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) >= 3:
+                    year = tds[0].get_text(strip=True)
+                    score_div = tds[1].find("div", class_="title")
+                    score = int(score_div.get_text(strip=True)) if score_div else 0
+                    rank = int(tds[2].get_text(strip=True))
+                    rankings[year] = {
+                        "score": score,
+                        "rank": rank
+                    }
+
+    return [
+        {"name": rider_name, "year": year} | yearly_ranking | specialties
+        for year, yearly_ranking in rankings.items()
+    ]
+
+
+async def fetch_all_riders(rider_names: list[str]) -> list[dict]:
+    async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
+        all_riders = []
+        for rider_name in tqdm(rider_names):
+            rider_data: list[dict] = await scrape_rider_data(client, rider_name)
+            all_riders.extend(rider_data)
+        return all_riders
+
 async def fetch_all_races() -> list:
     async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
         all_races = []
