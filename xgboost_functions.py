@@ -20,6 +20,7 @@ import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
+from xgboost.callback import EvaluationMonitor
 
 class RaceModel:
     """
@@ -46,11 +47,12 @@ class RaceModel:
         # 5-9: GC ┆ TT ┆ Sprint ┆ Climber ┆ Hills
 
         self.model = xgb.XGBClassifier(
-            n_estimators=2000,
+            n_estimators=100,
             max_depth=4,
             learning_rate=0.05,
             early_stopping_rounds=100,
-            eval_metric="logloss"
+            eval_metric="logloss",
+            callbacks=[EvaluationMonitor(show_stdv=True)]
         )
 
         self.rider_feature_idxs = [2, 3, 4, 5, 6, 7, 8, 9]
@@ -83,28 +85,41 @@ class RaceModel:
             eval_metric="logloss"
         )           
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        self.model.fit(
-            X, y,
-            eval_set=[(X, y)],
-            # early_stopping_rounds=50,  # stop if no improvement
-            verbose=False
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray) -> None:
+        params = {
+            "objective": "binary:logistic",
+            "eval_metric": "logloss"
+        }
+        dtrain = xgb.DMatrix(X_train, label=y_train)
+        dtest = xgb.DMatrix(X_test, label=y_test)
+
+        bst = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=100,
+            evals=[(dtest, "test")],
+            # early_stopping_rounds=50,
+            verbose_eval=True
         )
+        self.bst = bst
         return
     
     def to_xgboost_format(self, riders_data: pl.DataFrame, race_data: pl.DataFrame) -> np.ndarray:
         X = []
         y = []
-        nr_races = 100
-        nr_pairs_per_race = 100
         all_race_ids: list[int] = race_data.select(
             ["race_id"]
         ).unique().to_series().to_list()
+        nr_races = 100 #len(all_race_ids) #100
+        nr_pairs_per_race = 100
+
+        #TODO: VECTORIZE THIS
         for race_id in all_race_ids[:nr_races]:
             rider_pairs = self.get_rider_pairs(
                 race_id=race_id,
                 race_data=race_data
-            )[:nr_pairs_per_race]
+            )
+            rider_pairs = rider_pairs[:min(nr_pairs_per_race, len(rider_pairs))]
             race_year = race_data.filter(
                 pl.col("race_id") == race_id
             ).select("year").to_numpy()[0][0]
@@ -127,8 +142,11 @@ class RaceModel:
             X.append(race_X)
             y.append(race_Y)
 
-        
-        return np.vstack(X), np.vstack(y).flatten()
+        y = np.vstack(y).flatten()
+        X = np.vstack(X)
+        print(f"training on {len(y)} pairs")
+
+        return X, y
 
     def get_rider_pair_features(
         self, 
@@ -151,13 +169,13 @@ class RaceModel:
                 pl.col("name") == rider_0_name
             ).filter(
                 pl.col("year").is_in(years_to_go_back)
-            ).select(self.rider_features).to_numpy().flatten()
+            ).select(self.rider_features).to_numpy().flatten().astype(np.float32)
 
             rider_1_data = riders_data.filter(
                 pl.col("name") == rider_1_name
             ).filter(
                 pl.col("year").is_in(years_to_go_back)
-            ).select(self.rider_features).to_numpy().flatten()
+            ).select(self.rider_features).to_numpy().flatten().astype(np.float32)
 
             target_len = len(years_to_go_back) * len(self.rider_features)
 
@@ -226,17 +244,43 @@ class RaceModel:
         return X_train, y_train, X_test, y_test
 
     def evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray) -> None:
-        y_pred = self.model.predict(X_test)
+        dtest = xgb.DMatrix(X_test, label=y_test)
+        y_pred = self.bst.predict(dtest)
         accuracy = np.mean(y_pred == y_test)
-        auc = roc_auc_score(y_test, self.model.predict_proba(X_test)[:, 1])
+        auc = roc_auc_score(y_test, self.bst.predict(dtest))
         print(f"Test Accuracy: {accuracy:.4f}")
         print(f"Test AUC: {auc:.4f}")
+
+
+    # y_pred = (y_pred_proba > 0.5).astype(int)
+
+    # # Compute metrics
+    # accuracy = accuracy_score(y_test, y_pred)
+    # precision = precision_score(y_test, y_pred, zero_division=0)
+    # recall = recall_score(y_test, y_pred, zero_division=0)
+    # f1 = f1_score(y_test, y_pred, zero_division=0)
+    # auc = roc_auc_score(y_test, y_pred_proba)
+    # cm = confusion_matrix(y_test, y_pred)
+
+    # # Print results
+    # print("=== Evaluation Metrics ===")
+    # print(f"Accuracy:  {accuracy:.4f}")
+    # print(f"Precision: {precision:.4f}")
+    # print(f"Recall:    {recall:.4f}")
+    # print(f"F1 Score:  {f1:.4f}")
+    # print(f"AUC:       {auc:.4f}")
+    # print("Confusion Matrix:")
+    # print(cm)
+    # print("\nDetailed classification report:")
+    # print(classification_report(y_test, y_pred, digits=4))
+
         return
+
     
     def train_model(self, riders_data: pl.DataFrame, race_data: pl.DataFrame) -> None:
         X, y = self.to_xgboost_format(riders_data, race_data)
         X_train, y_train, X_test, y_test = self.split_train_test(X, y)
-        self.fit(X_train, y_train)
+        self.fit(X_train, y_train, X_test, y_test)
         print("Model fitted")
         self.evaluate_model(X_test, y_test)
         print("Model evaluated")
