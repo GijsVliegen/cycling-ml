@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 import math
@@ -99,12 +100,12 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=200,
+            num_boost_round=2000,
             evals=[],
             params = {
                 "eval_metric": "logloss",
                 "min_child_weight": 1,
-                "max_depth": 6,
+                "max_depth": 15,
                 "subsample": 0.5,
             },
             callbacks=[PrintIterationCallback()],
@@ -145,7 +146,7 @@ class RaceModel:
             if race_year < 2018:
                 continue
 
-            rider_pairs, pair_weights = self.get_rider_pairs(
+            rider_pairs, pair_weights = self.get_rider_pairs_weights(
                 race_id=race_id,
                 race_data=race_data
             )
@@ -167,15 +168,15 @@ class RaceModel:
 
             race_X = np.hstack([rider_pair_features, race_features])
             X.append(race_X)
-            X_weights.append(pair_weights)
+            X_weights.extend(pair_weights)
             y.append(race_Y)
 
         y = np.concatenate(y)
         X = np.vstack(X)
-        X_weights = np.vstack(X_weights)
+        X_weights = np.array(X_weights)
         print(f"training on {len(y)} pairs")
 
-        return X, y
+        return X, y, X_weights
 
     def get_rider_pair_features(
         self, 
@@ -262,7 +263,7 @@ class RaceModel:
 
         return feature_cols
 
-    def get_rider_pairs(self, race_id: int, race_data: pl.DataFrame, min_top_rank: int = 25) -> list[tuple[str, str, float]]:
+    def get_rider_pairs_weights(self, race_id: int, race_data: pl.DataFrame, min_top_rank: int = 25) -> list[tuple[str, str, float]]:
         """
         returns pairs of rider names and weight of importance, rider 0 is the favorite
 
@@ -272,8 +273,10 @@ class RaceModel:
             - names in the pair
             - weights: If a pair has weight w, then in the loss it behaves like it appears w times.
                 - weight of highest rank rider
-                - rank 1: w = 2, rank 25: w = 1
+                - rank 1: w = max_weight, rank 25: w = 1
         """
+        max_weight = 2
+
         if min_top_rank is None:
             nr_riders = race_data.filter(pl.col("race_id") == race_id).height
             min_top_rank = nr_riders
@@ -290,9 +293,53 @@ class RaceModel:
             for j, other_rider in enumerate(all_riders["name"]):
                 if i < j:
                     pairs.append((top_rider, other_rider))
-                    weights.append(1 + (min_top_rank - (i + 1)) / min_top_rank)  #weight between 1 and 2
+                    weights.append(1 + (max_weight - 1)*(min_top_rank - (i + 1)) / min_top_rank)  #weight between 1 and 2
         return pairs, weights
 
+    def get_rider_pair_win_diff(self, rider_0: str, rider_1: str, race_data: pl.DataFrame) -> int:
+        #filter race_data on rider names
+
+        #add boolean col if rider_0 present in that race
+        #add boolean col if rider_1 present in
+
+        #filter on both present
+        #compare ranks, count relative nr of wins for rider_0
+
+        race_data = race_data.filter(
+            (pl.col("name") == rider_0) | (pl.col("name") == rider_1)
+        )
+        race_data_with_rank_0 = race_data.with_columns(
+            pl.when(pl.col("name") == rider_0).then(pl.col("rank")).otherwise(-1).alias("rider_0_rank"),
+        )
+
+        #filter on both present
+        race_data_with_both = race_data_with_rank_0.filter(
+            (pl.col("name") == rider_1) & (pl.col("rider_0_rank") != -1)
+        )
+
+        #compare ranks, count relative nr of wins for rider_0
+        rider_0_wins = race_data_with_both.filter(
+            pl.col("rider_0_rank") < pl.col("rank")
+        ).height
+
+        return rider_0_wins / race_data_with_both.height
+
+    def rerank_top_25(self, rider_score_dict: dict[str, float], race_data: pl.DataFrame) -> pl.DataFrame:
+        """
+        reranks top 25 riders taking into account their historical pairwise win rates
+        """
+        riders = list(rider_score_dict.keys())[:25]
+        rider_pairs = itertools.product(riders, repeat=2)
+        rider_win_diffs = {rider: [] for rider in riders}
+        for rider_0, rider_1 in rider_pairs:
+            win_diff = self.get_rider_pair_win_diff(rider_0=rider_0, rider_1=rider_1, race_data=race_data)
+            rider_win_diffs[rider_0].append(win_diff)
+            rider_win_diffs[rider_1].append(1 - win_diff)
+        rider_avg_win_diffs = {
+            rider: np.mean(win_diffs) for rider, win_diffs in rider_win_diffs.items()
+        }
+            # win_diffs.append((rider_0, rider_1, win_diff))
+        return rider_avg_win_diffs
 
     def split_train_test(self, X: np.ndarray, y: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
