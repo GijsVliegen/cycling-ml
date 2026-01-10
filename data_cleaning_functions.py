@@ -1,22 +1,10 @@
 import asyncio
-import httpx
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from tqdm.asyncio import tqdm
 import polars as pl
-import re
 from pprint import pprint
-import pytest 
-import time
 from datetime import datetime
 import hashlib
 
-BASE_URL = "https://www.procyclingstats.com"
-
-# ---- Config ----
-CONCURRENT_REQUESTS = 10
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
+from download_html_functions import fetch_html
 from web_scraping_functions import *
 
 
@@ -108,60 +96,47 @@ async def get_all_results(k = -1, s = -1) -> list[dict]:
     
     races_urls = await fetch_all_races() #534 races
     race_datas = []
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
 
-        # for race_url in races_urls[0:2]: 
-        index = 0
-        while (k == -1 or len(race_datas) < k) and index < len(races_urls):
-            race_url = races_urls[index]
+    index = 0
+    while (k == -1 or len(race_datas) < k) and index < len(races_urls):
+        race_url = races_urls[index]
 
-            last_part = race_url.split("/")[-1]
-            if last_part == "result" or "stage" in last_part:
-                print(f"getting {race_url}")
-                try:
-                    race_profile_url = await get_race_profile_url(race_url)
-                    profile_resp = await client.get(race_profile_url)
-                    
-                    resp = await client.get(race_url)
+        last_part = race_url.split("/")[-1]
+        if last_part == "result" or "stage" in last_part:
+            print(f"getting {race_url}")
+            try:
+                race_profile_url = await get_race_profile_url(race_url)
+                profile_html = await fetch_html(race_profile_url)
+                race_html = await fetch_html(race_url)
 
-                    race_data = parse_race_page(resp.text, profile_resp.text, race_url)
-                    if not race_data:
-                        continue
-                    race_data["stats"] = filter_stats(race_data["stats"], race_url=race_url)
-                    if s != -1:
-                        race_data["results"] = filter_results(race_data["results"], race_data["stats"])[:s]
-                    else:
-                        race_data["results"] = filter_results(race_data["results"], race_data["stats"])
-                    # pprint(race_data)
-                    race_datas.append(race_data)
-                except Exception as e:
-                    print(f"Error occured: {e} for {race_url}")
-                    
-                time.sleep(1)
-
-            index += 1
+                race_data = parse_race_page(race_html, profile_html, race_url)
+                if not race_data:
+                    index += 1
+                    continue
+                race_data["stats"] = filter_stats(race_data["stats"], race_url=race_url)
+                filtered_results = filter_results(race_data["results"], race_data["stats"])
+                race_data["results"] = filtered_results[:s] if s != -1 else filtered_results
+                race_datas.append(race_data)
+            except Exception as e:
+                print(f"Error occured: {e} for {race_url}")
+        index += 1
 
     return race_datas
 
 async def get_results_one_race(race_url) -> dict:
-    # race_url_stage = "https://www.procyclingstats.com/race/tour-de-france/2024/stage-2"
-    # race_url_normal = ""#
-
     last_part = race_url.split("/")[-1]
     if last_part == "result" or "stage" in last_part:
-        async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
-            race_profile_url = await get_race_profile_url(race_url)
-            profile_resp = await client.get(race_profile_url)
-            
-            resp = await client.get(race_url)
-            race_data = parse_race_page(resp.text, profile_resp.text, race_url)
+        race_profile_url = await get_race_profile_url(race_url)
+        profile_html = await fetch_html(race_profile_url)
+        race_html = await fetch_html(race_url)
+        race_data = parse_race_page(race_html, profile_html, race_url)
 
-            # pprint(race_data)
-            if race_data:
-                race_data["stats"] = filter_stats(race_data["stats"], race_url=race_url)
-                race_data["results"] = filter_results(race_data["results"], race_data["stats"])[:25]
-                pprint(race_data)
-    return race_data
+        if race_data:
+            race_data["stats"] = filter_stats(race_data["stats"], race_url=race_url)
+            race_data["results"] = filter_results(race_data["results"], race_data["stats"])[:25]
+            pprint(race_data)
+            return race_data
+    return {}
 
 async def main():
     # await get_all_results()
