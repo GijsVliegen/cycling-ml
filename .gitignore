@@ -1,1 +1,7 @@
 venv
+html_cache/
+data_v2/
+logs
+urls
+bin
+__pycache__

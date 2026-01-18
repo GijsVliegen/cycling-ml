@@ -17,7 +17,7 @@ END_YEAR = 2025
 CONCURRENT_REQUESTS = 10
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-from web_scraping_functions import *
+from soup_parsing_functions import *
 
 test_race_url = "https://www.procyclingstats.com/race/liege-bastogne-liege/2016/result"
 
