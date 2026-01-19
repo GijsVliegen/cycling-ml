@@ -1,12 +1,6 @@
 
 import polars as pl
-from datetime import datetime
-import re
-import asyncio
-import rbo
-import itertools
-import httpx
-from data_cleaning_functions import filter_results, filter_stats, get_all_results, get_results_one_race
+from data_cleaning_functions import filter_results, filter_stats
 from soup_parsing_functions import (
     get_race_profile_url,
     parse_calendar_page,
@@ -337,16 +331,20 @@ def get_missing_races_overview(year: int):
 
 def main():
     logs = []
-    # logs = download_year_races(2025)
-    # more_logs = download_year_races(2024)
-    # logs += more_logs
-    # logs = make_riders_stats_df()
-    get_missing_data_overview()
     # fetch_year_race_urls(2024)
-    # stats, logs = parse_races_to_polars(2025)
-    # logs = make_races_results_df()
-    # logs = download_rider_pages()
-    # all_rider_stats_df, all_rider_yearly_stats_df, logs = parse_riders_to_polars()
+    # more_logs = download_year_races(2025)
+    # logs += more_logs
+    # stats, more_logs = parse_races_to_polars(2025)
+    # logs += more_logs
+    # more_logs = make_races_results_df()
+    # logs += more_logs
+    
+    # more_logs = download_rider_pages()
+    # logs += more_logs
+    # more_logs = make_riders_stats_df()
+    # logs += more_logs
+    get_missing_data_overview()
+
     with open(f"logs.txt", "w") as f:
         f.write("\n".join(logs))
     print(logs)

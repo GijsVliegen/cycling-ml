@@ -48,11 +48,9 @@ class RaceModel:
         # 0-4: name ┆ year ┆ score ┆ rank ┆ Onedayraces ┆ 
         # 5-9: GC ┆ TT ┆ Sprint ┆ Climber ┆ Hills
 
-
-        self.rider_feature_idxs = [2, 3, 4, 5, 6, 7, 8, 9]
         self.rider_features = [
-            "score", 
-            "rank",
+            # "score", 
+            # "rank",
             "Onedayraces",
             "GC",
             "TT",
@@ -60,7 +58,14 @@ class RaceModel:
             "Climber",
             "Hills",
         ]
-        self.race_features_idxs = [2, 3, 4, 5, 6, 14, 10]
+        self.rider_yearly_features = [
+            "points",
+            "racedays",
+            "kms",
+            "wins",
+            "top_3s",
+            "top_10s",
+        ]
         self.race_features = [ 
             "distance_km",
             "elevation_m",
@@ -100,13 +105,13 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=2000,
+            num_boost_round=500,
             evals=[],
             params = {
                 "eval_metric": "logloss",
-                "min_child_weight": 1,
-                "max_depth": 15,
-                "subsample": 0.5,
+                "min_child_weight": 10,
+                "max_depth": 10,
+                # "subsample": 0.05,
             },
             callbacks=[PrintIterationCallback()],
         )
@@ -127,7 +132,7 @@ class RaceModel:
         plt.show()
         return
     
-    def to_xgboost_format(self, riders_data: pl.DataFrame, race_data: pl.DataFrame) -> np.ndarray:
+    def to_xgboost_format(self, riders_data: pl.DataFrame, race_data: pl.DataFrame, riders_yearly_data: pl.DataFrame) -> np.ndarray:
         X = []
         y = []
         X_weights = []
@@ -143,7 +148,7 @@ class RaceModel:
                 pl.col("race_id") == race_id
             ).select("year").to_numpy()[0][0]
 
-            if race_year < 2018:
+            if race_year < 2014:
                 continue
 
             rider_pairs, pair_weights = self.get_rider_pairs_weights(
@@ -157,6 +162,7 @@ class RaceModel:
             rider_pair_features = self.get_rider_pair_features(
                 rider_pairs=rider_pairs,
                 riders_data=riders_data,
+                riders_yearly_data = riders_yearly_data,
                 race_year=race_year,
                 race_Y=race_Y
             )
@@ -182,19 +188,66 @@ class RaceModel:
         self, 
         rider_pairs: list[tuple[str, str]],
         riders_data: pl.DataFrame,
+        riders_yearly_data: pl.DataFrame,
         race_year: int,
         race_Y: np.ndarray
     ) -> np.ndarray:    
         """
-        TODO: if race_Y == 0, shift the pair since the first rider in data was the first in the race
+        rider_pairs, list of tuples of rider names, for a whole race (thousands of pairs)
+
+        returns np.ndarray of shape (nr_pairs, nr_features + nr_years * nr_yearly_features)
         """
-        pair_features = []
-        years_to_go_back = 3
+
+        nr_years = 3
         years_to_go_back = [
-            str(race_year - i) for i in range(1, years_to_go_back + 1)
+            str(race_year - i) for i in range(1, nr_years + 1)
         ]
 
-        rider_0_filters = pl.DataFrame(
+        def get_rider_data(rider_filters: pl.DataFrame) -> tuple[np.array, np.array]:
+            rider_0_data = riders_data.join(
+                rider_filters.unique(subset=["name_0","name_1"]).select("name_0"),
+                left_on=["name"],
+                right_on=["name_0"],
+                how="right"
+            ).fill_null(
+                np.NAN
+            ).select(self.rider_features)
+            rider_0_data: np.array = rider_0_data.to_numpy().astype(np.float32)
+            
+            rider_1_data: pl.DataFrame = riders_data.join(
+                rider_filters.unique(subset=["name_0","name_1"]).select("name_1"),
+                left_on=["name"],
+                right_on=["name_1"],
+                how="right"
+            ).fill_null(
+                np.NAN
+            ).select(self.rider_features)
+            rider_1_data: np.array = rider_1_data.to_numpy().astype(np.float32)
+            return rider_0_data, rider_1_data
+
+        def get_rider_yearly_data(rider_filters: pl.DataFrame) -> tuple[np.array, np.array]:
+            rider_0_yearly_data: pl.DataFrame = riders_yearly_data.join(
+                rider_filters,
+                left_on=["name", "season"],
+                right_on=["name_0", "year"],
+                how="right" #preserve order of pairs
+            ).fill_null(
+                np.NAN
+            ).select(self.rider_yearly_features)
+            rider_0_yearly_data: np.array = rider_0_yearly_data.to_numpy().astype(np.float32).reshape(len(rider_pairs), nr_years * len(self.rider_yearly_features))
+
+            rider_1_yearly_data: pl.DataFrame = riders_yearly_data.join(
+                rider_filters,
+                left_on=["name", "season"],
+                right_on=["name_1", "year"],
+                how="right" #preserve order of pairs
+            ).fill_null(
+                np.NAN
+            ).select(self.rider_yearly_features)
+            rider_1_yearly_data: np.array = rider_1_yearly_data.to_numpy().astype(np.float32).reshape(len(rider_pairs), nr_years * len(self.rider_yearly_features))
+            return rider_0_yearly_data, rider_1_yearly_data
+
+        rider_filters = pl.DataFrame(
             {
                 "name_0": rider_pair_names[0],
                 "name_1": rider_pair_names[1],
@@ -207,61 +260,15 @@ class RaceModel:
             for rider_pair_names, y in zip(rider_pairs, race_Y)
             for year in years_to_go_back
         )
+        rider_0_data, rider_1_data = get_rider_data(rider_filters)
+        rider_0_yearly_data, rider_1_yearly_data = get_rider_yearly_data(rider_filters)
 
-        rider_0_data: pl.DataFrame = riders_data.join(
-            rider_0_filters,
-            left_on=["name", "year"],
-            right_on=["name_0", "year"],
-            how="right" #preserve order of pairs
-        ).fill_null(
-            np.NAN
-        ).select(self.rider_features)
-        rider_0_data: np.array = rider_0_data.to_numpy().astype(np.float32).reshape(len(rider_pairs), 3 * len(self.rider_features))
+        yearly_feature_cols = rider_0_yearly_data - rider_1_yearly_data
 
-        rider_1_data: pl.DataFrame = riders_data.join(
-            rider_0_filters,
-            left_on=["name", "year"],
-            right_on=["name_1", "year"],
-            how="right" #preserve order of pairs
-        ).fill_null(
-            np.NAN
-        ).select(self.rider_features)
-        rider_1_data: np.array = rider_1_data.to_numpy().astype(np.float32).reshape(len(rider_pairs), 3 * len(self.rider_features))
-
-            # for rider_0_name, rider_1_name in rider_pairs: #TODO: make more efficient
-            #     rider_0_data = riders_data.filter(
-            #         pl.col("name") == rider_0_name
-            #     ).filter(
-            #         pl.col("year").is_in(years_to_go_back)
-            #     ).select(self.rider_features).to_numpy().flatten().astype(np.float32)
-
-            #     rider_1_data = riders_data.filter(
-            #         pl.col("name") == rider_1_name
-            #     ).filter(
-            #         pl.col("year").is_in(years_to_go_back)
-            #     ).select(self.rider_features).to_numpy().flatten().astype(np.float32)
-
-            #     target_len = len(years_to_go_back) * len(self.rider_features)
-
-            #     rider_0_data = np.pad(rider_0_data, (0, target_len - len(rider_0_data)), mode='constant', constant_values=np.NAN)
-            #     rider_1_data = np.pad(rider_1_data, (0, target_len - len(rider_1_data)), mode='constant', constant_values=np.NAN)
-            #     features = np.concatenate([rider_0_data, rider_1_data])
-            #     pair_features.append(features)
-
-            # pair_features = np.array(pair_features)
-        # year_cols = [i * len(self.rider_features) for i in range(len(years_to_go_back) * 2)]
         feature_cols = rider_0_data - rider_1_data
-
-
-        #shift pair depending on y value
-        # X_shifted = pair_features.copy()
-        # shift_mask = race_Y == 0
-        # shift_length = pair_features.shape[1] // 2
-        # pair_features[shift_mask, :shift_length] = X_shifted[shift_mask, shift_length:]
-        # pair_features[shift_mask, shift_length:] = X_shifted[shift_mask, :shift_length]
-
-
-        return feature_cols
+        all_feat_cols = np.hstack([feature_cols, yearly_feature_cols])
+        
+        return all_feat_cols
 
     def get_rider_pairs_weights(self, race_id: int, race_data: pl.DataFrame, min_top_rank: int = 25) -> list[tuple[str, str, float]]:
         """
@@ -275,7 +282,7 @@ class RaceModel:
                 - weight of highest rank rider
                 - rank 1: w = max_weight, rank 25: w = 1
         """
-        max_weight = 2
+        max_weight = 10
 
         if min_top_rank is None:
             nr_riders = race_data.filter(pl.col("race_id") == race_id).height
@@ -293,7 +300,9 @@ class RaceModel:
             for j, other_rider in enumerate(all_riders["name"]):
                 if i < j:
                     pairs.append((top_rider, other_rider))
-                    weights.append(1 + (max_weight - 1)*(min_top_rank - (i + 1)) / min_top_rank)  #weight between 1 and 2
+                    # weights.append(1 + ((max_weight - 1)*(min_top_rank - (i + 1))) / min_top_rank)  #weight between 1 and 10
+                    weights.append(1 + ((max_weight - 1)*(min_top_rank - abs(i-j))) / min_top_rank)  #weight between 1 and 10
+                    #more distance between two places, more weight
         return pairs, weights
 
     def get_rider_pair_win_diff(self, rider_0: str, rider_1: str, race_data: pl.DataFrame) -> int:
@@ -398,34 +407,30 @@ class RaceModel:
 
         return
 
-    def train_model(self, riders_data: pl.DataFrame, race_data: pl.DataFrame) -> None:
-        X, y, x_weights = self.to_xgboost_format(riders_data, race_data)
+    def train_model(self, riders_data: pl.DataFrame, race_data: pl.DataFrame, riders_yearly_data: pl.DataFrame) -> None:
+        X, y, x_weights = self.to_xgboost_format(riders_data, race_data, riders_yearly_data)
         X_train, y_train, train_weights, X_test, y_test, test_weights = self.split_train_test(X, y, x_weights)
         self.fit(X_train, y_train, X_test, y_test, train_weights, test_weights)
         print("Model fitted")
         self.evaluate_model(X_test, y_test, test_weights=test_weights)
         print("Model evaluated")
 
-    def predict_race(self, riders_data: pl.DataFrame, race_data: pl.DataFrame, race_id: str):
-        rider_pairs = self.get_rider_pairs(
+    def predict_race(self, riders_data: pl.DataFrame, race_data: pl.DataFrame, riders_yearly_data: pl.DataFrame,race_id: str):
+        rider_pairs, _ = self.get_rider_pairs_weights(
             race_id = race_id,
             race_data = race_data,
             min_top_rank = None
         )
-        #TODO: add some random switching of pairs 
         race_year = race_data.filter(
             pl.col("race_id") == race_id
         ).select("year").to_numpy()[0][0]
-        race_Y = np.ones(len(rider_pairs))  #dummy
+        race_Y = np.ones(len(rider_pairs))  #dummy Y
         rider_features = self.get_rider_pair_features(
             rider_pairs = rider_pairs,
             riders_data = riders_data,
+            riders_yearly_data=riders_yearly_data,
             race_year = race_year,
             race_Y = race_Y
-            # rider_pairs: list[tuple[str, str]],
-            # riders_data: pl.DataFrame,
-            # race_year: int,
-            # race_Y: np.ndarray
         )
         dtest = xgb.DMatrix(rider_features, label=race_Y)
         y_pred_proba = self.bst.predict(dtest)
@@ -451,10 +456,11 @@ class RaceModel:
         pass
 
 def main():
-    riders_data = pl.read_parquet("data/rider_data.parquet")
-    race_data = pl.read_parquet("data/features_df.parquet")
+    riders_data = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    race_data = pl.read_parquet("data_v2/features_df.parquet")
+    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     model = RaceModel()
-    model.train_model(riders_data, race_data)
+    model.train_model(riders_data, race_data, riders_yearly_data)
 
     # races = pl.read_parquet("data/races_df.parquet")
     # print(races.filter(pl.col("date") == "2024-07-20").head(5))

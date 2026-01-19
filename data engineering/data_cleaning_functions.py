@@ -4,7 +4,6 @@ from pprint import pprint
 from datetime import datetime
 import hashlib
 
-from download_html_functions import fetch_html
 from soup_parsing_functions import *
 
 

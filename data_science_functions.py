@@ -107,122 +107,10 @@ def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
     # print(results)
     return pl.DataFrame(results)
 
-def score(rider: pl.DataFrame, race: pl.DataFrame, normalized_races_df: pl.DataFrame, results_similarity_df: pl.DataFrame, results_df: pl.DataFrame) -> pl.DataFrame:
-
-    race_similarity_weights = find_most_similar_races(normalised_upcoming_race_df=race, normalized_races_df=normalized_races_df, k = -1)
-    # print(race_similarity_weights)
-
-    rider_results = results_df.filter(pl.col("name").is_in(rider.select(pl.col("name")).to_series().to_list()))
-    rider_results = rider_results.select([
-        "rank", "name", "uci_pts", "pcs_pts", "race_id"
-    ])
-    rider_results_and_weights = rider_results.join(
-        race_similarity_weights.select([
-            "race_id", "date", "startlist_score", "knn_distance"
-        ]),
-        on = "race_id",
-        how = "inner"
-    ).rename({"knn_distance": "race_similarity_distance"})
-
-    #add year of result
-    rider_results_and_weights = rider_results_and_weights.with_columns(
-        pl.col("date").str.strptime(
-            pl.Date, 
-            "%Y-%m-%d",
-            strict=False
-        ).dt.year().fill_null(2000).alias("year")
-    )
-    #calculate nr of results in top x for that year
-
-    rider_results_and_weights = rider_results_and_weights.with_columns([
-        pl.when(pl.col("rank") <= 3) 
-            .then((
-                pl.when(pl.col("rank") <= 3) 
-                    .then(pl.struct(["name","year"])) .otherwise(None) 
-                .n_unique().over("name") - 1)
-            ).when((pl.col("rank") > 3) & (pl.col("rank") <= 8)) 
-            .then((
-                pl.when((pl.col("rank") > 3) & (pl.col("rank") <= 8)) 
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1) 
-            ).when((pl.col("rank") > 8) & (pl.col("rank") <= 15)) 
-            .then((
-                pl.when((pl.col("rank") > 8) & (pl.col("rank") <= 15)) 
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1) 
-            ).when((pl.col("rank") > 15) & (pl.col("rank") <= 25)) 
-            .then((
-                pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25)) 
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1) 
-            ) .otherwise(-1)
-        .alias("rank_bucket_year_count") 
-    ])
-
-    ## TODO: add extra score for streaking wins in a season and every season continously, favoring a longer career of wins over a shorter one
-
-    # rider_results_and_weights = rider_results_and_weights.with_columns(
-    #         pl.col("date").str.strptime(
-    #             pl.Date, 
-    #             "%Y-%m-%d",
-    #             strict=False
-    #     ).alias("parsed_date")
-    # ).sort(["name", "parsed_date"]).with_columns([
-    #     pl.when(pl.col("rank") < 150)
-    #     .then(1)
-    #     .otherwise(0)
-    #     .alias("top_25")
-    # ]).with_columns([
-    #     (pl.col("top_25").cum_sum().over("name", "year")
-    #     ).alias("yearly_top_25_streak")
-    # ])
-    # .with_columns(
-    #     1 
-    #     + 0.1*pl.col("yearly_top_25_streak") 
-    #     + 0.1*pl.col("consecutive_years_streak")
-    #     / pl.len().over("name")
-    # )
 
 
-    rider_scores = rider_results_and_weights.group_by("name").agg([
-        pl.when(pl.col("rank") < 25).then(
-            # (pl.col("pcs_pts")) 
-            (1 / pl.col("rank"))
-            * (1 / (pl.col("race_similarity_distance") + 1)) #inverse for race similarity a good idea? 
-            * (1 + pl.col("startlist_score")) #startlist score is between 0 and 1, so this adds between 1 and 2 factor
-            / (pl.col("rank_bucket_year_count") ** 0.5 + 1) #weigh down by sqrt of number of results in that bin, to avoid overrating high nr of races and lots of low top 25 results
-            # * (1 + pl.col("top25_years") / 10) #favorr riders with more years in top 25
-        ) .otherwise(0)
-        .sum().alias("score"),
-    ]).sort("score", descending=True)
 
-
-    print(rider_scores)
-    
-    ## TODO: add time decay
-    
-    return rider_scores
-
-def check_results_df():
-    results_df = pl.read_parquet("data/results_df.parquet")
-    print(results_df)
-    rows_with_minus_one = results_df.filter(pl.col("rank") == -1)
-    print(f"Number of rows with rank -1: {rows_with_minus_one.height}")
-    if rows_with_minus_one.height > 0:
-        print(rows_with_minus_one)
-
-def check_races_df():
-    races_df = pl.read_parquet("data/races_df.parquet")
-    print(races_df)
-
-    results_df = pl.read_parquet("data/results_df.parquet")
-    results_similarity = create_results_similarity(results_df)
-    # print(results_similarity.sort("rbo_score", descending=True))
-
-    interpolated_races = fillout_races_without_profile_scores(races_df=races_df, results_similarity=results_similarity)
-    print(interpolated_races)
-
-def fillout_races_without_profile_scores(races_df: pl.DataFrame, results_similarity: pl.DataFrame) -> pl.DataFrame:
+def interpolate_profile_scores(races_df: pl.DataFrame, results_similarity: pl.DataFrame) -> pl.DataFrame:
     #interpolates missing profile scores based on weighted average using results-similarity as weight
 
     #do this before normalization
@@ -249,15 +137,6 @@ def fillout_races_without_profile_scores(races_df: pl.DataFrame, results_similar
         ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_last_25k_2"))
         .sum().alias("interpolated_profile_score_last_25k")
     )
-
-    # Compare with original profile scores if available
-    # print(interpolated_profile_scores.join(
-    #     races_df.rename({"race_id": "race_id_1"}).select(
-    #         "race_id_1", "profile_score", "profile_score_last_25k"
-    #     ),
-    #     on="race_id_1",
-    #     how="left"
-    # ).sort("race_id_1"))
 
     interpolated_races = races_df.join(
         interpolated_profile_scores.select([
@@ -286,8 +165,11 @@ def fillout_races_without_profile_scores(races_df: pl.DataFrame, results_similar
 
 
 def scores_to_probability_results(rider_scores: pl.DataFrame, participants: pl.DataFrame) -> pl.DataFrame:
-    #convert rider scores to probability of getting each result for each rider
+    """convert rider scores to probability of getting each result for each rider
 
+    rider_scores should have a col "score"
+    
+    """
     def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int = 5) -> Dict[int, List[float]]:
         # edge cases
         n = len(scores)
@@ -427,92 +309,33 @@ def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataF
     return basic_features
     
 
-def old_main():
-    pl.Config.set_tbl_cols(-1)
-
-    results_df = pl.read_parquet("data/results_df.parquet")
-    results_df = results_df.filter(pl.col("rank") != -1) #filter out DNF, DNS, OTL
-    print(results_df)
-    races_df = pl.read_parquet("data/races_df.parquet")
-
-    results_similarity = create_results_similarity(results_df)
-    print(results_similarity)
-    results_similarity.write_parquet("data/results_similarity.parquet")
-    races_df = fillout_races_without_profile_scores(races_df=races_df, results_similarity=results_similarity)
-
-    normalized_races_df = normalize_race_data(races_df=races_df)
-    print(normalized_races_df.sort("race_id"))
-    normalized_races_df.write_parquet("data/normalized_races_df.parquet")
-    
-    # racers_to_predict = results_df.sort("rank")[0:50] #TODO: to train or test the ML model, predict top 25 -> also good for wielermanager points. 
-    # print(f"racer =")
-    # print(racers_to_predict)
-
-    upcoming_race = normalized_races_df[40]
-    normalized_races_df = normalized_races_df.slice(40)
-
-    print(f"race = ")
-    print(upcoming_race)
-
-    racers_to_predict = results_df.filter(pl.col("race_id") == upcoming_race["race_id"])
-    print(f"racers =")
-    print(racers_to_predict)
-
-    scores = score(
-        rider=racers_to_predict,
-        race=upcoming_race,
-        normalized_races_df=normalized_races_df,
-        results_similarity_df=results_similarity,
-        results_df=results_df
-    )
-    # print(scores)
-    predicted_result_probs = scores_to_probability_results(
-        rider_scores=scores,
-        participants=racers_to_predict.select(pl.col("name").unique()),
-    )
-    print(predicted_result_probs)
-
-    check = results_df.filter(pl.col("race_id").is_in(upcoming_race.select(pl.col("race_id")).to_series().to_list())).join(
-        scores,
-        on = "name",
-        how = "left"
-    ).select(["rank", "name", "score"])
-    print(check.sort("score", descending=True).head(10))
-
-
-    #TODO: add specialty col to races based on counts of specialtiys in results
-    #TODO: add altitude per distance col
-
 def main():
     """create features dataframe"""
     pl.Config.set_tbl_cols(-1)
 
-    results_df = pl.read_parquet("data/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     results_similarity = create_results_similarity(results_df)
-    results_similarity.write_parquet("data/results_similarity.parquet")
+    results_similarity.write_parquet("data_v2/results_similarity.parquet")
     print(results_df)
     # print(results_similarity)
 
-    races_df = pl.read_parquet("data/races_df.parquet")
-    filled_out_races_df = fillout_races_without_profile_scores(races_df=races_df, results_similarity=results_similarity)
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
     
-    normalized_races_df = normalize_race_data(races_df=filled_out_races_df)
-    print(filled_out_races_df)
+    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
+    print(interpolated_races_df)
 
-
-    # normalized_races_df = normalize_race_data(races_df=races_df)
-    # normalized_races_df.write_parquet("data/normalized_races_df.parquet")
 
     features_df = create_feature_table(results=results_df, races=normalized_races_df)
     print(features_df)
-    features_df.write_parquet("data/features_df.parquet")
+    features_df.write_parquet("data_v2/features_df.parquet")
 
 def check_features_stats():
     """
     Check statistics on features: rider entries, races per year, and races per classification.
-    Computes everything from the data/features_df.parquet table.
+    Computes everything from the data_v2/features_df.parquet table.
     """
-    features_df = pl.read_parquet("data/features_df.parquet")
+    features_df = pl.read_parquet("data_v2/features_df.parquet")
 
     # Rider entries stats
     print(features_df.fetch(5))
@@ -548,6 +371,32 @@ def check_features_stats():
     print(f'Max riders per race: {max_riders}')
     print(f'Mean riders per race: {mean_riders:.2f}')
 
+def check_races_stats():
+    """
+    Check statistics on races
+
+    avg startlist score over classification
+    """
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    nr_of_classification_races = (races_df
+        .group_by("classification")
+        .agg(pl.count().alias("num_races"))
+        .sort("classification")
+    )
+    print(nr_of_classification_races)
+    avg_startlist_score = (races_df
+        .with_columns(
+            pl.col("startlist_score").cast(pl.Float64)
+        )
+        .group_by("classification")
+        .agg(
+            pl.col("startlist_score").mean().alias("avg_startlist_score")
+        )
+        .sort("classification")
+    )
+    print(avg_startlist_score)
+
+
 def clean_rider_stats():
     """Cleans some of the cols of rider data.
     
@@ -556,16 +405,15 @@ def clean_rider_stats():
     
     """
     pass
-    # rider_df = pl.read_parquet("data/rider_data.parquet")
-    # rider_df.write_parquet("data/rider_data.parquet")
 
 def check_rider_stats():
-    rider_df = pl.read_parquet("data/rider_data.parquet")
+    rider_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
     print(rider_df)
 
 if __name__ == "__main__":
-    main()
+    # main()
     # check_results_df()
-    # check_races_df()
+    # check_races_stats()
     # check_features_stats()
-    check_rider_stats()
+    # check_rider_stats()
+    pass
