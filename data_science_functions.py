@@ -15,7 +15,6 @@ condition_similarity_cols = [
     # "classification", #TODO (also convert to numeric value)
     "distance_km", 
     "elevation_m", 
-    # "avg_speed_kmh", 
     "startlist_score",
     "profile_score",
     "profile_score_last_25k",
@@ -52,7 +51,7 @@ def normalize_race_data(races_df: pl.DataFrame) -> pl.DataFrame:
 
 def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
     top25 = (
-        races_df
+        races_df.sort("rank")
         .group_by("race_id")
         .agg(
             pl.col("name").filter(pl.col("rank") < 25).alias("top_25_names")
@@ -68,41 +67,41 @@ def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
 
     # Calculate pairwise combinations
     pairs = list(itertools.combinations(range(len(races)), 2))
-    
+    # len(pairs) = len(races) * (len(races)-1) / 2
+
+    # print(len(pairs))
+    # print(len(races))
     # Calculate RBO scores for all pairs
-    results = []
+    results = [0] * len(pairs) * 2
+    # print(len(results))
     
-    for i, j in pairs:
+    for index, (i, j) in enumerate(pairs):
+        # print( index * 2)
         race_i = races[i]
         race_j = races[j]
         list_i = lists[i]
         list_j = lists[j]
 
             # Handle empty lists
-        if list_i is None or list_j is None:
-            rbo_score = 0.0
-        else:
-            try:
-                # Calculate RBO score
-                rbo_score = rbo.RankingSimilarity(list_i, list_j).rbo(p=0.9) #TODO: check out the p value
-            except Exception as e:
-                print(f"Error calculating RBO for {race_i} vs {race_j}: {e}")
-                rbo_score = 0.0
-        
-        results.append({ #pair (a, b)
+        # if list_i is None or list_j is None:
+        #     rbo_score = 0.0
+        #     print(f"empty list for {race_i} vs {race_j}")
+        rbo_score = rbo.RankingSimilarity(list_i, list_j).rbo(p=0.9) #TODO: check out the p value
+        results[index * 2] = { #pair (a, b)
             'race_id_1': race_i,
             'race_id_2': race_j,
             'rbo_score': rbo_score,
             'list_1_length': len(list_i) if list_i is not None else 0,
             'list_2_length': len(list_j) if list_j is not None else 0
-        })
-        results.append({ #pair (b, a)
+        }
+        results[index * 2 + 1] = { #pair (b, a)
             'race_id_1': race_j,
             'race_id_2': race_i,
             'rbo_score': rbo_score,
             'list_1_length': len(list_j) if list_j is not None else 0,
             'list_2_length': len(list_i) if list_i is not None else 0
-        })
+        }
+    assert not any([r == 0 for r in results])
 
     # print(results)
     return pl.DataFrame(results)
@@ -117,19 +116,25 @@ def interpolate_profile_scores(races_df: pl.DataFrame, results_similarity: pl.Da
     
     profile_score_races = races_df.filter((pl.col("profile_score") > 0) & (pl.col("profile_score_last_25k") > 0))
 
-    results_similarity_with_profile = results_similarity.join(
-        profile_score_races.select(
-            [
-                pl.col("race_id").alias("race_id_2"), 
-                pl.col("profile_score").alias("profile_score_2"), 
-                pl.col("profile_score_last_25k").alias("profile_score_last_25k_2"), 
-            ]
-        ),
-        on = "race_id_2",
-        how = "inner"
-    )
-    results_similarity_with_profile = results_similarity_with_profile.with_columns(
-        pl.col("rbo_score").sum().over("race_id_1").alias("rbo_score_sum")
+    knn = 10
+    results_similarity_with_profile = (results_similarity
+        .join(
+            profile_score_races.select(
+                [
+                    pl.col("race_id").alias("race_id_2"), 
+                    pl.col("profile_score").alias("profile_score_2"), 
+                    pl.col("profile_score_last_25k").alias("profile_score_last_25k_2"), 
+                ]
+            ),
+            on = "race_id_2",
+            how = "inner"
+        )
+        .sort("rbo_score", descending=True)
+        .group_by("race_id_1")
+        .head(knn)
+        .with_columns(
+            pl.col("rbo_score").sum().over("race_id_1").alias("rbo_score_sum")
+        )
     )
     interpolated_profile_scores = results_similarity_with_profile.group_by("race_id_1").agg(
         ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_2"))
@@ -213,152 +218,282 @@ def scores_to_results(rider_scores: pl.DataFrame, participants: pl.DataFrame, ra
         how = "left"
     ).sort("score", descending=True).with_row_index("predicted_result", offset=1)
 
-def create_feature_table(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataFrame:
-    spine = ["name", "race_id"]
-    race_distance_features = [
+def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, riders: pl.DataFrame) -> pl.DataFrame:
+    riders = riders.select([
+        "name",
+        "Onedayraces",
+        "GC",
+        "TT",
+        "Sprint",
+        "Climber",
+        "Hills",
+    ])
+    results = results.select(["name", "race_id"]).join(
+        riders,
+        on="name",
+    )
+    race_avg_rider_stats = results.group_by("race_id").agg([
+        pl.col("Onedayraces").mean().alias("avg_Onedayraces"),
+        pl.col("GC").mean().alias("avg_GC"),
+        pl.col("TT").mean().alias("avg_TT"),
+        pl.col("Sprint").mean().alias("avg_Sprint"),
+        pl.col("Climber").mean().alias("avg_Climber"),
+        pl.col("Hills").mean().alias("avg_Hills"),
+    ])
+    races = races.with_columns(
+        pl.col("date").str.to_date()
+    )
+    race_avg_rider_stats = race_avg_rider_stats.join(
+        races.select([
+            pl.col("name").alias("race_name"),
+            "race_id",
+            "date"
+        ]),
+        on = "race_id"
+    )
+    race_avg_rider_stats_over_3y = race_avg_rider_stats.sort("date").group_by_dynamic(
+        index_column="date",
+        every="1d",
+        period="160w",
+        offset="-160w",
+        group_by="race_name",
+        closed="right", #Cannot used closed when doing inference
+        start_by="window"
+    ).agg(
+        pl.col("avg_Onedayraces").mean().alias("avg_Onedayraces"),
+        pl.col("avg_GC").mean().alias("avg_GC"),
+        pl.col("avg_TT").mean().alias("avg_TT"),
+        pl.col("avg_Sprint").mean().alias("avg_Sprint"),
+        pl.col("avg_Climber").mean().alias("avg_Climber"),
+        pl.col("avg_Hills").mean().alias("avg_Hills"),
+    )
+    races = races.join(
+        race_avg_rider_stats_over_3y.rename({"race_name": "name"}),
+        on = ["name", "date"],
+        how="left"
+    )
+
+    return races
+
+def create_result_features_table(results: pl.DataFrame, races_features: pl.DataFrame) -> pl.DataFrame:
+    points_dict = {
+        1: 100,
+        2: 80,
+        3: 65,
+        4: 55,
+        5: 45,
+        6: 40,
+        7: 35,
+        8: 30,
+        9: 25,
+        10: 20,
+        11: 18,
+        12: 16,
+        13: 14,
+        14: 12,
+        15: 10,
+        16: 9,
+        17: 8,
+        18: 7,
+        19: 6,
+        20: 5,
+        21: 4,
+        22: 3,
+        23: 2,
+        24: 1
+    }
+    race_features = [
         "distance_km", 
         "elevation_m", 
         "profile_score", 
         "profile_score_last_25k",
         "classification",
-        "date"
-    ]
-    result_features = [
-        "rank",
-        "startlist_score",
-        "age"
-    ]
-    basic_features = results.join(
-        races,
-        on="race_id",
-    ).select(spine + race_distance_features + result_features)
-
-    basic_features = basic_features.with_columns(
-        pl.when(pl.col("rank") <= 3).then(1)
-        .when(pl.col("rank") <= 8).then(2)
-        .when(pl.col("rank") <= 15).then(3)
-        .when(pl.col("rank") <= 25).then(4)
-        .when(pl.col("rank") <= 50).then(5)
-        .otherwise(6)
-        .alias("rank_bucket")
-    ).with_columns(
-        (
-            (pl.col("rank") / pl.col("rank").max().over("race_id")) 
-        ).alias("rank_norm")
-    ).with_columns(
-        (
-            ((pl.col("age") - pl.col("age").min()) / pl.col("age").max()) 
-        ).alias("age_norm")
-    ).with_columns(
-        pl.col("date").str.strptime(pl.Date, "%Y-%m-%d", strict=False)
-        .dt.year().alias("year")
-    )
-
-    basic_features = basic_features.with_columns([
-        pl.when(pl.col("rank") <= 3)
-            .then((
-                pl.when(pl.col("rank") <= 3)
-                    .then(pl.struct(["name","year"])) .otherwise(None)
-                .n_unique().over("name") - 1)
-            ).when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
-            .then((
-                pl.when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1)
-            ).when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
-            .then((
-                pl.when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1)
-            ).when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
-            .then((
-                pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1)
-            ) 
-            .otherwise((
-                pl.when((pl.col("rank") > 25))
-                    .then(pl.struct(["name", "year"])) .otherwise(None)
-                .n_unique().over("name") - 1)
-            )
-        .alias("rank_bucket_year_count")
-    ])
-    basic_features = basic_features.with_columns([
-        pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
-        .sum().over(["name", "year"]).alias("top25_count_year"),
-        pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
-        .sum().over("name").alias("top25_count")
-    ]).with_columns(
-        (pl.col("date").rank("ordinal").over("name") - 1).alias("attended_races")
-    )
-    basic_features = basic_features.with_columns(
-        pl.col("classification").cast(pl.Categorical).to_physical().alias("classification_encoded")
-    )
-
-    nr_riders = basic_features.group_by(
+        "date",
         "race_id"
-    ).agg(
-        pl.col("name").count().alias("nr_riders")
-    )
-    basic_features = basic_features.join(
-        nr_riders,
+    ]
+    results_features = results.join(
+        races_features,
         on="race_id",
+    )
+    race_type_points = results_features.with_columns(
+        pl.when(pl.col("rank") < 25)
+        .then(
+            pl.col("rank").replace(points_dict))
+        .otherwise(0).alias("rank_points"),
+    )
+    race_type_points = race_type_points.with_columns(
+        (pl.col("avg_Onedayraces") * pl.col("rank_points")).alias("odr_points"),
+        (pl.col("avg_GC") * pl.col("rank_points")).alias("gc_points"),
+        (pl.col("avg_TT") * pl.col("rank_points")).alias("tt_points"),
+        (pl.col("avg_Sprint") * pl.col("rank_points")).alias("sprint_points"),
+        (pl.col("avg_Climber") * pl.col("rank_points")).alias("climber_points"),
+        (pl.col("avg_Hills") * pl.col("rank_points")).alias("hills_points")
+    ).sort("date")
+    
+    windows = {
+        "6w": "6w",
+        "1y": "1y",
+        "3y": "3y",
+    }
+
+    dfs = []
+
+    for label, period in windows.items():
+        dfs.append(
+            race_type_points.group_by_dynamic(
+                index_column="date",
+                period=period,
+                offset=f"-{period}",
+                every="1d",
+                group_by="name",
+                start_by="window",
+            )
+            .agg(
+                pl.sum("odr_points").alias(f"odr_{label}"),
+                pl.sum("gc_points").alias(f"gc_{label}"),
+                pl.sum("tt_points").alias(f"tt_{label}"),
+                pl.sum("sprint_points").alias(f"sprint_{label}"),
+                pl.sum("climber_points").alias(f"climber_{label}"),
+                pl.sum("hills_points").alias(f"hills_{label}"),
+            )
+        )
+    
+    race_type_points = dfs[0]
+    for d in dfs[1:]:
+        race_type_points = race_type_points.join(d, on=["name", "date"], how="left")
+
+    results = results.join(
+        races_features.select(["race_id", "date"]),
+        on="race_id"
+    ).join(
+        race_type_points,
+        on=["name", "date"],
         how="left"
     )
+    # sum_exprs = [
+    #     pl.when(
+    #         pl.col("date") >= pl.col("date").dt.offset_by(offset)
+    #     )
+    #     .then(expr)
+    #     .otherwise(0)
+    #     .sum()
+    #     .over("name")
+    #     .alias(f"{col}_{win}_sum")
+    #     for col, expr in point_cols.items()
+    #     for win, offset in windows.items()
+    # ]
+    # results_features = results_features.with_columns(
+    #     sum_exprs
+    # )
+    return results
+    # basic_features = basic_features.with_columns(
+    #     pl.when(pl.col("rank") <= 3).then(1)
+    #     .when(pl.col("rank") <= 8).then(2)
+    #     .when(pl.col("rank") <= 15).then(3)
+    #     .when(pl.col("rank") <= 25).then(4)
+    #     .when(pl.col("rank") <= 50).then(5)
+    #     .otherwise(6)
+    #     .alias("rank_bucket")
+    # ).with_columns(
+    #     (
+    #         (pl.col("rank") / pl.col("rank").max().over("race_id")) 
+    #     ).alias("rank_norm")
+    # ).with_columns(
+    #     (
+    #         ((pl.col("age") - pl.col("age").min()) / pl.col("age").max()) 
+    #     ).alias("age_norm")
+    # ).with_columns(
+    #     pl.col("date").str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+    #     .dt.year().alias("year")
+    # )
 
-    return basic_features
-    
+    # basic_features = basic_features.with_columns([
+    #     pl.when(pl.col("rank") <= 3)
+    #         .then((
+    #             pl.when(pl.col("rank") <= 3)
+    #                 .then(pl.struct(["name","year"])) .otherwise(None)
+    #             .n_unique().over("name") - 1)
+    #         ).when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
+    #         .then((
+    #             pl.when((pl.col("rank") > 3) & (pl.col("rank") <= 8))
+    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
+    #             .n_unique().over("name") - 1)
+    #         ).when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
+    #         .then((
+    #             pl.when((pl.col("rank") > 8) & (pl.col("rank") <= 15))
+    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
+    #             .n_unique().over("name") - 1)
+    #         ).when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
+    #         .then((
+    #             pl.when((pl.col("rank") > 15) & (pl.col("rank") <= 25))
+    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
+    #             .n_unique().over("name") - 1)
+    #         ) 
+    #         .otherwise((
+    #             pl.when((pl.col("rank") > 25))
+    #                 .then(pl.struct(["name", "year"])) .otherwise(None)
+    #             .n_unique().over("name") - 1)
+    #         )
+    #     .alias("rank_bucket_year_count")
+    # ])
+    # basic_features = basic_features.with_columns([
+    #     pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+    #     .sum().over(["name", "year"]).alias("top25_count_year"),
+    #     pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+    #     .sum().over("name").alias("top25_count")
+    # ]).with_columns(
+    #     (pl.col("date").rank("ordinal").over("name") - 1).alias("attended_races")
+    # )
+    # basic_features = basic_features.with_columns(
+    #     pl.col("classification").cast(pl.Categorical).to_physical().alias("classification_encoded")
+    # )
 
-def main():
-    """create features dataframe"""
-    pl.Config.set_tbl_cols(-1)
+    # nr_riders = basic_features.group_by(
+    #     "race_id"
+    # ).agg(
+    #     pl.col("name").count().alias("nr_riders")
+    # )
+    # basic_features = basic_features.join(
+    #     nr_riders,
+    #     on="race_id",
+    #     how="left"
+    # )
 
-    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    results_similarity = create_results_similarity(results_df)
-    results_similarity.write_parquet("data_v2/results_similarity.parquet")
-    print(results_df)
-    # print(results_similarity)
+"""*****************************************************
 
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
-    interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
-    
-    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
-    print(interpolated_races_df)
+MAIN Functions
 
-
-    features_df = create_feature_table(results=results_df, races=normalized_races_df)
-    print(features_df)
-    features_df.write_parquet("data_v2/features_df.parquet")
+*****************************************************"""
 
 def check_features_stats():
     """
-    Check statistics on features: rider entries, races per year, and races per classification.
-    Computes everything from the data_v2/features_df.parquet table.
+    Check statistics on result_features: rider entries, races per year, and races per classification.
+    Computes everything from the data_v2/result_features_df.parquet table.
     """
-    features_df = pl.read_parquet("data_v2/features_df.parquet")
+    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
 
     # Rider entries stats
-    print(features_df.fetch(5))
-    rider_entries = features_df.group_by("name").agg(pl.len().alias("num_entries"))
+    print(result_features_df.fetch(5))
+    rider_entries = result_features_df.group_by("name").agg(pl.len().alias("num_entries"))
     avg_entries = rider_entries.select(pl.col("num_entries").mean()).item()
     min_entries = rider_entries.select(pl.col("num_entries").min()).item()
     max_entries = rider_entries.select(pl.col("num_entries").max()).item()
     print(f"Rider entries - Avg: {avg_entries:.2f}, Min: {min_entries}, Max: {max_entries}")
 
     # Races per year
-    races_per_year = features_df.with_columns(
+    races_per_year = result_features_df.with_columns(
         pl.col("date").str.strptime(pl.Date, "%Y-%m-%d", strict=False).dt.year().alias("year")
     ).group_by("year").agg(pl.col("race_id").n_unique().alias("num_races")).sort("year")
     print("Races per year:")
     print(races_per_year)
 
     # Races per classification
-    races_per_classification = features_df.group_by("classification").agg(pl.col("race_id").n_unique().alias("num_races")).sort("classification")
+    races_per_classification = result_features_df.group_by("classification").agg(pl.col("race_id").n_unique().alias("num_races")).sort("classification")
     print("Races per classification:")
     print(races_per_classification)
 
     # Riders per race
-    riders_per_race = features_df.group_by('race_id').agg(pl.
+    riders_per_race = result_features_df.group_by('race_id').agg(pl.
     col('name').n_unique().alias('num_riders'))
     min_riders = riders_per_race.select(
         pl.col('num_riders').min()
@@ -396,7 +531,6 @@ def check_races_stats():
     )
     print(avg_startlist_score)
 
-
 def clean_rider_stats():
     """Cleans some of the cols of rider data.
     
@@ -407,11 +541,40 @@ def clean_rider_stats():
     pass
 
 def check_rider_stats():
-    rider_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
-    print(rider_df)
+    pass
+
+def create_normalized_race_data():
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    results_similarity = create_results_similarity(results_df)
+    interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
+    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
+    normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
+
+def main():
+    """create features dataframe"""
+    pl.Config.set_tbl_cols(-1)
+
+    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
+    riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+
+    races_features_df = create_race_features_table(
+        races=races_df, 
+        results=results_df,
+        riders=riders_df
+    )
+    races_features_df.write_parquet("data_v2/races_features_df.parquet") 
+
+    result_features_df = create_result_features_table(results=results_df, races_features=races_features_df)
+    # print(result_features_df)
+    result_features_df.write_parquet("data_v2/result_features_df.parquet")
+
+
 
 if __name__ == "__main__":
-    # main()
+    # create_normalized_race_data()
+    main()
     # check_results_df()
     # check_races_stats()
     # check_features_stats()
