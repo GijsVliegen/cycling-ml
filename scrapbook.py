@@ -28,10 +28,10 @@ import polars as pl
 
 stage_race_url = "https://www.procyclingstats.com/race/paris-nice/2025"
 
-def test_gc_parsing():
-    soup = load_soup_from_http(stage_race_url)
-    stage_urls = parse_gc_page(soup)
-    print(stage_urls)
+# def test_gc_parsing():
+#     soup = load_soup_from_http(stage_race_url)
+#     stage_urls = parse_gc_page(soup)
+#     print(stage_urls)
 
 def main():
     test_gc_parsing()

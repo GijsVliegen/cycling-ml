@@ -730,32 +730,32 @@ def get_RVV_2024_id():
     ).select("race_id").to_numpy()[0][0]
     return race_id
 
-def test_prediction(model: RaceModel, All: np.ndarray, torch_data: torch.tensor):
-    rvv_id = get_RVV_2024_id()
-    ranks_to_consider = nr_riders_test
-    rider_idxs = np.where(
-        (All["race_id"] == rvv_id) & (All["rank"] <= ranks_to_consider)
-    )[0]
+# def test_prediction(model: RaceModel, All: np.ndarray, torch_data: torch.tensor):
+#     rvv_id = get_RVV_2024_id()
+#     ranks_to_consider = nr_riders_test
+#     rider_idxs = np.where(
+#         (All["race_id"] == rvv_id) & (All["rank"] <= ranks_to_consider)
+#     )[0]
 
-    Y_pred_scores = model.predict_ranking_for_race(
-        indices = rider_idxs,
-        data = All,
-        torch_data = torch_data
-    )
-    predicted_ranks = torch.argsort(torch.argsort(-Y_pred_scores))
-    real_ranks = All["rank"][rider_idxs]
-    print("Predicted ranking for RVV 2024:")
+#     Y_pred_scores = model.predict_ranking_for_race(
+#         indices = rider_idxs,
+#         data = All,
+#         torch_data = torch_data
+#     )
+#     predicted_ranks = torch.argsort(torch.argsort(-Y_pred_scores))
+#     real_ranks = All["rank"][rider_idxs]
+#     print("Predicted ranking for RVV 2024:")
 
-    #only print top real ranks
-    sorted_indices_on_real_rank = np.argsort(real_ranks)
-    for i in sorted_indices_on_real_rank[:max_rank_test]:
-        real_rank = real_ranks[i]
-        rider_idx = rider_idxs[i]
-        rider_name = All["name"][rider_idx]
-        predicted_rank = predicted_ranks[i]
+#     #only print top real ranks
+#     sorted_indices_on_real_rank = np.argsort(real_ranks)
+#     for i in sorted_indices_on_real_rank[:max_rank_test]:
+#         real_rank = real_ranks[i]
+#         rider_idx = rider_idxs[i]
+#         rider_name = All["name"][rider_idx]
+#         predicted_rank = predicted_ranks[i]
 
-        rider_score = Y_pred_scores[i].item()
-        print(f"{real_rank}: {rider_name}, predicted rank = {predicted_rank} (Score: {rider_score:.4f})")
+#         rider_score = Y_pred_scores[i].item()
+#         print(f"{real_rank}: {rider_name}, predicted rank = {predicted_rank} (Score: {rider_score:.4f})")
 
 
 def main() -> None:
