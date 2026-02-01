@@ -416,6 +416,132 @@ def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, rider
     races_features = pl.concat([races_STAGES, races_ONE_DAY_RACES]).unique()
     return races_features
 
+def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataFrame:
+    races = races.with_columns(
+        pl.col("classification").cast(pl.Categorical)
+    )
+    race_features_to_bucket_on = [
+        "distance_km",
+        "elevation_m",
+        "profile_score",
+        "profile_score_last_25k",
+        # final km percentage #TODO: scrape from data
+        # "classification",
+        # "startlist_score",
+        # "date", #str
+        # "stage_or_one_day", #?
+    ]
+    windows = {
+        "1110d": 1110,
+        # "370d": 370,
+    }
+    rank_thresholds = [
+        # 25,
+        10
+    ]
+    #create feature for every comb of window, win_count and race_features
+
+    races = races.with_columns(
+        pl.col("date").str.to_date()
+    )
+    #create buckets:
+    races_bucketed = races.with_columns(
+        [
+            pl.col(c).qcut(3, labels=["1", "2", "3"]).alias(f"{c}_bucket").cast(pl.Categorical)
+            for c in race_features_to_bucket_on
+        ]
+    )
+    top_results = results.filter(pl.col("rank") <= 10)
+    results_bucketed = top_results.join(
+        races_bucketed,
+        on = "race_id",
+        how= "inner"
+    )
+    feature_creation_expressions = [
+        # pl.when(pl.col("top_25_count").is_null() | (pl.col("top_25_count") == 0)).then(0).otherwise
+        (
+            (pl.col(f"{bucket_feature}_bucket") == bucket)
+            / (pl.len())
+        ).sum() 
+        .alias(f"top_{rank_threshold}_in_{bucket_feature}_{bucket}")
+        for bucket_feature in race_features_to_bucket_on
+        for bucket in ["1", "2", "3"]
+        for rank_threshold in rank_thresholds
+    ] 
+
+    dfs = []
+
+    results_bucketed_window_dates = results_bucketed.with_columns(
+        [
+            (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
+            for label, offset in windows.items()
+        ]
+    )
+    results_bucketed_window_dates = results_bucketed_window_dates.sort("date")
+    lf = results_bucketed_window_dates.lazy()
+    for label, _ in windows.items():
+        dfs.append(
+            lf.group_by_dynamic(
+                index_column=f"_window_date_{label}",
+                period=label,
+                offset= f"-{label}",
+                every="1d",
+                group_by="name",
+                start_by="window",
+            ).agg(
+                feature_creation_expressions
+            ).rename({f"_window_date_{label}": "date"}).collect(streaming=True)
+        )
+
+    race_type_points = dfs[0]
+    for d in dfs[1:]:
+        d = d.with_columns(
+
+        )
+        race_type_points = race_type_points.join(d, on=["name", "date"], how="left")
+        
+
+    #relativise over total top 25
+    return None
+    # results.with_columns(
+    #     (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
+    # ).group_by_dynamic(
+    #     index_column=f"_window_date_{label}",
+    #     period=label,
+    #     offset= f"-{label}",
+    #     every="1d",
+    #     group_by="name",
+    #     start_by="window",
+    # ).agg(
+    #     pl.sum(
+    #         pl.when(pl.col("rank") <= 25).then(1)
+    #         .otherwise(0)
+    #     ).alias("top_25_count")
+    #     pl.sum(
+    #         pl.when(pl.col("rank") <= 25).then(
+    #             pl.when(
+    #                 pl.col("distance_km_bucket") == 1
+    #             ).then(1)
+    #         ).otherwise(0)
+    #     )
+    #     pl.sum("odr_points").alias(f"odr_{label}"),
+    #     pl.sum("gc_points").alias(f"gc_{label}"),
+    #     pl.sum("tt_points").alias(f"tt_{label}"),
+    #     pl.sum("sprint_points").alias(f"sprint_{label}"),
+    #     pl.sum("climber_points").alias(f"climber_{label}"),
+    #     pl.sum("hills_points").alias(f"hills_{label}"),
+    #     pl.count("race_id").alias(f"nr_races_participated_{label}"),
+    #     (pl.when(pl.col("rank") < 25).then(1)
+    #         .otherwise(None)
+    #     ).sum().alias(f"nr_top25_{label}"),
+    #     (pl.when(pl.col("rank") < 10).then(1)
+    #         .otherwise(None)
+    #     ).sum().alias(f"nr_top10_{label}"),
+    #     (pl.when(pl.col("rank") < 3).then(1)
+    #         .otherwise(None)
+    #     ).sum().alias(f"nr_top3_{label}"),
+    # ).rename({f"_window_date_{label}": "date"})
+    pass
 
 RANK_POINTS_DICT = {
     1: 100,
@@ -617,15 +743,17 @@ def main():
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
 
-    races_features_df = create_race_features_table(
-        races=races_df, 
-        results=results_df,
-        riders=riders_df
-    )
-    races_features_df.write_parquet("data_v2/races_features_df.parquet") 
+    # races_features_df = create_race_features_table(
+    #     races=races_df, 
+    #     results=results_df,
+    #     riders=riders_df
+    # )
+    # races_features_df.write_parquet("data_v2/races_features_df.parquet") 
 
-    result_features_df = create_result_features_table(results=results_df, races_features=races_features_df)
+    # result_features_df = create_result_features_table(results=results_df, races_features=races_features_df)
+    result_features_df = create_result_features_pre_embed(results=results_df, races=normalized_races_df)
     # print(result_features_df)
     result_features_df.write_parquet("data_v2/result_features_df.parquet")
 
