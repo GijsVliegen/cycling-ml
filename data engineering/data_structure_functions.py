@@ -10,6 +10,7 @@ from soup_parsing_functions import (
     parse_race_result_page,
     parse_rider_page,
     parse_rider_statistics_page,
+    parse_startlist_page
 )
 
 from selenium_webscraping import (
@@ -20,9 +21,24 @@ from selenium_webscraping import (
 )
 
 
+BASE_URL = "https://www.procyclingstats.com"
 
-# def get_racer_df(races_data):
-    
+
+def transform_new_race_data(new_race_dict: dict) -> pl.DataFrame:
+    races_df = pl.DataFrame(new_race_dict)
+    races_df = races_df.with_columns([
+        # pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"),
+        pl.col("distance_km").cast(pl.Float64, strict=False),
+        pl.col("elevation_m").cast(pl.Float64, strict=False),
+        pl.col("avg_speed_kmh").cast(pl.Float64, strict=False),
+        pl.col("startlist_score").cast(pl.Float64, strict=False),
+        pl.col("temp").cast(pl.Float64, strict=False),
+        pl.col("profile_score").cast(pl.Float64, strict=False),
+        pl.col("profile_score_last_25k").cast(pl.Float64, strict=False),
+        #TODO: add profile scores
+    ])
+    return races_df
+
 def transform_race_data(all_race_stats: list[dict], all_results: list[dict]) -> pl.DataFrame:
     """
     Transform race data using Polars with the following operations:
@@ -74,10 +90,10 @@ def fetch_year_race_urls(year: int) -> list[str]:
         "1.UWT",
         "2.UWT",
         "1.Pro",
+        "2.1",
         "2.Pro",
         "1.1", #GP samyn is 1.1
     ]
-    BASE_URL = "https://www.procyclingstats.com"
     all_race_urls = []
     for classification in classifications_to_search:
         calender_url = f"{BASE_URL}/races.php?year={year}&circuit=&class={classification}"
@@ -99,7 +115,7 @@ def fetch_year_race_urls(year: int) -> list[str]:
             race_urls.extend(stage_urls)
         all_race_urls.extend(race_urls)
     
-    with open(f"races_{year}.txt", "w") as f:
+    with open(f"urls/races_{year}.txt", "w") as f:
         f.write("\n".join(all_race_urls))
     return all_race_urls
 
@@ -111,8 +127,6 @@ def download_rider_pages() -> list[dict]:
     """
     results = pl.read_parquet("data_v2/results_df.parquet")
     rider_names = results.select("name").unique()["name"].to_list()
-
-    BASE_URL = "https://www.procyclingstats.com"
 
     log_messages = []
 
@@ -168,7 +182,6 @@ def parse_riders_to_polars() -> tuple[pl.DataFrame, pl.DataFrame]:
     results = pl.read_parquet("data_v2/results_df.parquet")
     rider_names = results.select("name").unique()["name"].to_list()
 
-    BASE_URL = "https://www.procyclingstats.com"
 
     log_messages = []
     all_rider_stats = []
@@ -204,7 +217,13 @@ def parse_riders_to_polars() -> tuple[pl.DataFrame, pl.DataFrame]:
     return all_rider_stats_df, all_rider_yearly_stats_df, log_messages
                                
 
-def parse_races_to_polars(year: int) -> list[dict]:
+def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -> list[dict]:
+    """Parse races for a certain year from saved html files to polars DataFrames
+    
+    races already_in_polars (race_name, year) are excluded from parsing
+    """
+
+
     year_races_file = f"urls/races_{year}.txt"
     with open(year_races_file, "r") as f:
         race_urls = f.read().splitlines()
@@ -213,10 +232,18 @@ def parse_races_to_polars(year: int) -> list[dict]:
     all_race_stats = []
     all_results = []
     for race_url in race_urls:
-        tail = race_url.split("/")[-1]
+        race_name, year, tail = race_url.split("/")[-3:]
+        if (race_name, year) in already_in_polars:
+            print(f"Skipping already parsed race {race_url}")
+            continue
         if "result" not in tail and "stage" not in tail and "prologue" not in tail:
             continue
-        race_soup = load_soup_from_file(race_url)
+        print(f"parsing {race_url}")
+        try: 
+            race_soup = load_soup_from_file(race_url)
+        except Exception as e:
+            logs.append(f"exception for loading race file {race_url}: {e}")
+            continue
         try:
             race_stats = parse_race_page(race_soup)
         except Exception as e:
@@ -268,14 +295,76 @@ def parse_races_to_polars(year: int) -> list[dict]:
 
     return races_df, results_df, logs
 
+def parse_new_race_to_dict(race_name, stage_nr = 1) -> tuple[dict, list[str]]:
+    logs = []
+    if stage_nr > 0:
+        race_url = f"{BASE_URL}/race/{race_name}/2026/stage-{stage_nr}"
+    else:
+        race_url = f"{BASE_URL}/race/{race_name}/2026/result"
+    
+    tail = race_url.split("/")[-1]
+    race_soup = load_soup_from_http(race_url)
+    try:
+        race_stats = parse_race_page(race_soup)
+    except Exception as e:
+        logs.append(f"exception for parsing race page {race_url}: {e}")
+        return None, logs
+
+    race_profile_url = get_race_profile_url(race_url)
+    race_profile_soup = load_soup_from_http(race_profile_url)
+    race_name, year, tail = race_url.split("/")[-3:]
+    mapping = {
+        "result": 1,
+        "prologue": 0,
+    }
+    stage_nr = mapping[tail] if tail in mapping else int(tail.split("-")[1])
+    race_profile, parse_logs = parse_race_profile_page(
+        race_profile_soup,
+        race_name=race_name,
+        year=year,
+        stage_nr=stage_nr
+    )
+    logs.extend(parse_logs)
+
+    try:
+        race_stats = filter_stats(race_stats | race_profile, race_url)
+    except Exception as e:
+        logs.append(f"exception for filtering stats: {e}")
+        return None, logs
+    
+    try:
+        race_df = transform_new_race_data(
+            new_race_dict=race_stats,
+        )
+    except Exception as e:
+        logs.append(f"exception for filtering stats: {e}")
+        return None, logs
+    
+    # race_results, parse_logs = parse_race_result_page(race_soup)
+    # logs.extend(parse_logs)
+    
+    # try:
+    #     race_results = filter_results(race_results, race_stats)
+    # except Exception as e:
+    #     logs.append(f"exception for filtering stats: {e}")
+    #     return None, logs
+    return race_df, logs
+
+
 def make_races_results_df():
     current_races_df = pl.read_parquet("data/races_df.parquet")
     current_results_df = pl.read_parquet("data/results_df.parquet")
-
-    year_range = range(2024, 2026)
+    races_in_polars = [
+        (race["name"], race["year"]) 
+        for race in current_races_df.select(["name", "year"]).unique().to_dicts()
+    ]
+    year_range = range(2022, 2026)
     logs = []
     for year in year_range:
-        races_df, results_df, parse_logs = parse_races_to_polars(year)
+        races_df, results_df, parse_logs = parse_races_to_polars(
+            year = year,
+            already_in_polars = races_in_polars
+        )
         logs.extend(parse_logs)
         current_races_df = pl.concat([current_races_df, races_df]).unique(subset=["name", "race_id"])
         current_results_df = pl.concat([current_results_df, results_df]).unique(subset=["name", "race_id"])
@@ -328,14 +417,41 @@ def get_missing_races_overview(year: int):
     print(f"Number of races in index for year {year}: {nr_of_races_in_index}")
     print(f"Number of races in races df for year {year}: {len(races_in_races_df)}") 
 
+def main_new():
+    """Get data for prediction of future race"""
+    race = "alula-tour" 
+    stage_nr = 3
+    startlist_url = f"{BASE_URL}/race/{race}/2026/startlist"
+
+    startlist_soup = load_soup_from_http(startlist_url)
+    startlist = parse_startlist_page(startlist_soup)
+    race_df, logs = parse_new_race_to_dict(
+        race_name = race,
+        stage_nr=stage_nr
+    )
+    if logs != []:
+        return logs
+    startlist_df = pl.DataFrame(startlist)
+    startlist_df.write_parquet("data_v2/new_race_startlist.parquet")
+    race_df.write_parquet("data_v2/new_race_stats.parquet")
+    return logs
+
 
 def main():
     logs = []
+    # fetch_year_race_urls(2025)
     # fetch_year_race_urls(2024)
-    # more_logs = download_year_races(2025)
-    # logs += more_logs
-    # stats, more_logs = parse_races_to_polars(2025)
-    # logs += more_logs
+    # fetch_year_race_urls(2023)
+    # fetch_year_race_urls(2022)
+    # fetch_year_race_urls(2021) #still needs to happen for 2.1 rraces
+
+    # for i in range(2013, 2026):
+    #     fetch_year_race_urls(i)
+
+    # for i in range(2021, 2026):
+    #     more_logs = download_year_races(i)
+    #     logs += more_logs
+
     # more_logs = make_races_results_df()
     # logs += more_logs
     
@@ -343,7 +459,8 @@ def main():
     # logs += more_logs
     # more_logs = make_riders_stats_df()
     # logs += more_logs
-    get_missing_data_overview()
+
+    logs = main_new()
 
     with open(f"logs.txt", "w") as f:
         f.write("\n".join(logs))

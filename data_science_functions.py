@@ -56,21 +56,22 @@ def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalize
         (
             (pl.col(c) - normalised_upcoming_race_df[c]) ** 2
         ).alias(c)
-        for c in condition_similarity_cols
+        for c in RACE_SIMILARITY_COLS
     ])
     knn_races = knn_races.with_columns([
         (pl.sum_horizontal(
-            pl.col([c for c in condition_similarity_cols])
-        ) #/ len(condition_similarity_cols) #TODO: not needed? right? check formula
+            pl.col([c for c in RACE_SIMILARITY_COLS])
+        ) #/ len(RACE_SIMILARITY_COLS) #TODO: not needed? right? check formula
         ).sqrt().alias("knn_distance"),
     ]).sort("knn_distance").head(k)
     return knn_races
+
 
 def normalize_race_data(races_df: pl.DataFrame) -> pl.DataFrame:
 
     return races_df.with_columns([
         (pl.col(c) - pl.col(c).min()) / (pl.col(c).max() - pl.col(c).min())
-        for c in condition_similarity_cols
+        for c in RACE_SIMILARITY_COLS
     ])
 
 
@@ -193,23 +194,32 @@ def interpolate_profile_scores(races_df: pl.DataFrame, results_similarity: pl.Da
 
     return interpolated_races
 
+import numpy as np
 
-def scores_to_probability_results(rider_scores: pl.DataFrame, participants: pl.DataFrame) -> pl.DataFrame:
+def scores_to_probability_results(rider_scores: pl.DataFrame) -> pl.DataFrame:
     """convert rider scores to probability of getting each result for each rider
 
     rider_scores should have a col "score"
     
     """
-    def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int = 5) -> Dict[int, List[float]]:
+    def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int = 10) -> Dict[int, List[float]]:
         # edge cases
         n = len(scores)
         if n == 0:
             return []
-        total_sum = sum(scores)
-        if total_sum == 0:
-            return [[0.0] * n for _ in range(max_rank_to_predict)]
-        
-        current_probs = [s / total_sum for s in scores]
+        total_sum = sum([
+            s if s > 0 else 0
+            for s in scores
+        ])
+        # if total_sum == 0:
+        #     return [[0.0] * n for _ in range(max_rank_to_predict)]
+        # scores = np.array(scores)
+        # weights = np.exp(scores)
+        # current_probs = weights / weights.sum()
+        current_probs = [
+            s / total_sum if s > 0 else 0 
+            for s in scores
+        ]
         rank_probs = {1: current_probs.copy()}
         for pos in range(2, max_rank_to_predict + 1):
             new_probs = [0.0] * n
@@ -228,9 +238,9 @@ def scores_to_probability_results(rider_scores: pl.DataFrame, participants: pl.D
     # Usage
     scores = rider_scores["score"].to_list()
     rank_probs = compute_plackett_luce_probs(scores)
-    for k in range(len(rank_probs)):
+    for k in range(1, len(rank_probs) + 1):
         rider_scores = rider_scores.with_columns(
-            pl.Series(f"rank{k+1}_prob", rank_probs[k])
+            pl.Series(f"rank_{k}_prob", rank_probs[k])
         )
 
     return rider_scores
@@ -243,7 +253,7 @@ def scores_to_results(rider_scores: pl.DataFrame, participants: pl.DataFrame, ra
         how = "left"
     ).sort("score", descending=True).with_row_index("predicted_result", offset=1)
 
-condition_similarity_cols = [
+RACE_SIMILARITY_COLS = [
     "distance_km", 
     "elevation_m", 
     "profile_score",
@@ -254,11 +264,11 @@ def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
     closest 5 races in the same stage-race over last 3 years
 
     """
-    duplicate_races = races.select("race_id", "name", "year", *condition_similarity_cols).join(
-        races.select("race_id", "name", "year", *condition_similarity_cols),
+    duplicate_races = races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+        races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
         on = ["name"]
     ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 3
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
     ).filter(
         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
     ).filter(
@@ -266,16 +276,33 @@ def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
     )
     #TODO years should be replaced by dates, so only earlier stages are taken
     # not critical tho
-    duplicate_races_distance_part = duplicate_races.with_columns([
+    duplicate_races_normalized = duplicate_races.with_columns(
+        *[
+            (
+                (pl.col(c) - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised")
+            for c in RACE_SIMILARITY_COLS
+        ],
+        *[
+            (
+                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised_right")
+            for c in RACE_SIMILARITY_COLS
+        ]
+    )
+    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
         (
-            (pl.col(c) - pl.col(f"{c}_right")) ** 2
+            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
         ).alias(f"{c}_distance")
-        for c in condition_similarity_cols
+        for c in RACE_SIMILARITY_COLS
     ])
     duplicate_races_distance = duplicate_races_distance_part.with_columns(
         (pl.sum_horizontal([
             pl.col(f"{c}_distance") 
-            for c in condition_similarity_cols])
+            for c in RACE_SIMILARITY_COLS
+        ])
         ).sqrt().alias("total_distance")
     )
     closest_races_distance = duplicate_races_distance.sort(
@@ -389,42 +416,34 @@ def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, rider
     races_features = pl.concat([races_STAGES, races_ONE_DAY_RACES]).unique()
     return races_features
 
+
+RANK_POINTS_DICT = {
+    1: 100,
+    2: 80,
+    3: 65,
+    4: 55,
+    5: 45,
+    6: 40,
+    7: 35,
+    8: 30,
+    9: 25,
+    10: 20,
+    11: 18,
+    12: 16,
+    13: 14,
+    14: 12,
+    15: 10,
+    16: 9,
+    17: 8,
+    18: 7,
+    19: 6,
+    20: 5,
+    21: 4,
+    22: 3,
+    23: 2,
+    24: 1
+}
 def create_result_features_table(results: pl.DataFrame, races_features: pl.DataFrame) -> pl.DataFrame:
-    points_dict = {
-        1: 100,
-        2: 80,
-        3: 65,
-        4: 55,
-        5: 45,
-        6: 40,
-        7: 35,
-        8: 30,
-        9: 25,
-        10: 20,
-        11: 18,
-        12: 16,
-        13: 14,
-        14: 12,
-        15: 10,
-        16: 9,
-        17: 8,
-        18: 7,
-        19: 6,
-        20: 5,
-        21: 4,
-        22: 3,
-        23: 2,
-        24: 1
-    }
-    race_features = [
-        "distance_km", 
-        "elevation_m", 
-        "profile_score", 
-        "profile_score_last_25k",
-        "classification",
-        "date",
-        "race_id"
-    ]
     results_features = results.join(
         races_features,
         on="race_id",
@@ -432,7 +451,7 @@ def create_result_features_table(results: pl.DataFrame, races_features: pl.DataF
     race_type_points = results_features.with_columns(
         pl.when(pl.col("rank") < 25)
         .then(
-            pl.col("rank").replace(points_dict))
+            pl.col("rank").replace(RANK_POINTS_DICT))
         .otherwise(0).alias("rank_points"),
     )
     race_type_points = race_type_points.with_columns(
@@ -596,7 +615,7 @@ def main():
     pl.Config.set_tbl_cols(-1)
 
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
     riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
 
     races_features_df = create_race_features_table(

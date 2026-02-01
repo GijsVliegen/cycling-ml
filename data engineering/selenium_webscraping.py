@@ -18,7 +18,7 @@ options.add_argument("--disable-blink-features=AutomationControlled")
 options.add_argument("--start-maximized")
 
 html_storage_dir = "html_cache"
-# driver = webdriver.Chrome(service=Service(), options=options) #TODO: IS this needed?
+driver = webdriver.Chrome(service=Service(), options=options) #TODO:outcomment if no webscraping is done?
 
 def url_to_filename(url: str) -> str:
     """

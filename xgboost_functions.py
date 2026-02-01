@@ -148,7 +148,7 @@ class RaceModel:
                 "objective": "reg:squarederror",
                 "eval_metric": "rmse",
                 "min_child_weight": 10,
-                "max_depth": 6,
+                "max_depth": 4,
                 "tree_method": "hist",
                 "max_bin": 128,
                 # "subsample": 0.05,
@@ -174,7 +174,6 @@ class RaceModel:
     
     def to_xgboost_format(
         self, 
-        riders_data: pl.DataFrame, 
         result_features_df: pl.DataFrame, 
         riders_yearly_data: pl.DataFrame,
         races_features_df: pl.DataFrame,
@@ -415,18 +414,18 @@ class RaceModel:
         last 20% of years as test set
         this is done by sorting the columns and splitting
         """
-        years = X[:, -2]
+        years = X[:, -8]
         unique_years = np.unique(years)
         split_year = unique_years[int(len(unique_years) * 0.8)]
 
         train_mask = years < split_year
         test_mask = years >= split_year
 
-        X_train = X[train_mask][:, :-2]
+        X_train = X[train_mask]
         y_train = y[train_mask]
         train_weights = weights[train_mask]
 
-        X_test = X[test_mask][:, :-2]
+        X_test = X[test_mask]
         y_test = y[test_mask]
         test_weights = weights[test_mask]
 
@@ -477,7 +476,6 @@ class RaceModel:
             races_features_df: pl.DataFrame
         ) -> None:
         X, y, x_weights = self.to_xgboost_format(
-            riders_data= riders_data, 
             result_features_df=result_features_df, 
             riders_yearly_data=riders_yearly_data, 
             races_features_df = races_features_df 
@@ -558,7 +556,6 @@ def predict():
 
     """Evaluate model"""
     X, y, x_weights = model.to_xgboost_format(
-        riders_data= riders_data, 
         result_features_df=result_features_df, 
         riders_yearly_data=riders_yearly_data, 
         races_features_df = races_features_df 
@@ -590,8 +587,8 @@ def predict():
     )
 
 def main():
-    # train()
-    predict()
+    train()
+    # predict()
 
 if __name__ == "__main__":
     main()

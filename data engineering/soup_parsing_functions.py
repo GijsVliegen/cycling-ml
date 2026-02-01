@@ -338,46 +338,40 @@ def parse_rider_page(soup) -> dict:
         return specialties  
     else:
         raise RuntimeError("Could not find specialties list")
-        
-    # Rankings
-    # rankings = {}
-    # h4 = soup.find("h4", string="PCS Ranking position per season")
-    # if h4:
-    #     table = h4.find_next("table")
-    #     if table:
-    #         tbody = table.find("tbody")
-    #         for tr in tbody.find_all("tr"):
-    #             tds = tr.find_all("td")
-    #             if len(tds) >= 3:
-    #                 year = tds[0].get_text(strip=True)
-    #                 score_div = tds[1].find("div", class_="title")
-    #                 score = int(score_div.get_text(strip=True)) if score_div else 0
-    #                 rank = int(tds[2].get_text(strip=True))
-    #                 rankings[year] = {
-    #                     "score": score,
-    #                     "rank": rank
-    #                 }
 
-    # return [
-    #     {"name": rider_name, "year": year} | yearly_ranking | specialties
-    #     for year, yearly_ranking in rankings.items()
-    # ]
+def parse_startlist_page(soup) -> list[dict]:
+    """
+    Page example: 
+    https://www.procyclingstats.com/race/alula-tour/2026/startlist
+    """
+    riders = []
 
-# async def fetch_all_riders(rider_names: list[str]) -> list[dict]:
-#     async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
-#         all_riders = []
-#         for rider_name in tqdm(rider_names):
-#             rider_data: list[dict] = await scrape_rider_data(client, rider_name)
-#             all_riders.extend(rider_data)
-#         return all_riders
+    # Each <li> under startlist_v4 is a team block
+    for team_li in soup.select("ul.startlist_v4 > li"):
+        # Get the team slug from the <a class="team">
+        team_tag = team_li.select_one(".ridersCont > div > a.team")
+        if not team_tag or "href" not in team_tag.attrs:
+            continue
+        team_href = team_tag["href"]
+        if not team_href.startswith("team/"):
+            continue
+        team_slug = team_href.split("team/")[1].strip()
 
-# async def fetch_all_races() -> list:
-#     async with httpx.AsyncClient(headers=HEADERS, timeout=30.0) as client:
-#         all_races = []
-#         for year in range(START_YEAR, END_YEAR + 1):
-#             races = await fetch_races_for_year(client, year)
-#             all_races.extend(races)
-#         return list(set(all_races))
+        # Loop over each rider in this team
+        for rider_li in team_li.select("ul li"):
+            rider_a = rider_li.find("a")
+            if rider_a and "href" in rider_a.attrs:
+                href = rider_a["href"]
+                if href.startswith("rider/"):
+                    rider_slug = href.split("rider/")[1].strip()
+                    riders.append({
+                        "rider": rider_slug,
+                        "team": team_slug
+                    })
+
+    return riders
+
+
 
 # ---- Run ----
 async def main():
