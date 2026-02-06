@@ -1,5 +1,5 @@
 import polars as pl
-from data_science_functions import RACE_SIMILARITY_COLS, RANK_POINTS_DICT, scores_to_probability_results
+from data_science_functions import RACE_SIMILARITY_COLS, scores_to_probability_results
 
 
 # def normalize_new_race_data(new_race: pl.DataFrame, old_races: pl.DataFrame) -> pl.DataFrame:

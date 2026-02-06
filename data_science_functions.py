@@ -137,64 +137,72 @@ def normalize_race_data(races_df: pl.DataFrame) -> pl.DataFrame:
 
 
 
-def interpolate_profile_scores(races_df: pl.DataFrame, results_similarity: pl.DataFrame) -> pl.DataFrame:
+def interpolate_profile_scores(races_df: pl.DataFrame) -> pl.DataFrame:
     #interpolates missing profile scores based on weighted average using results-similarity as weight
 
     #do this before normalization
-    
-    profile_score_races = races_df.filter((pl.col("profile_score") > 0) & (pl.col("profile_score_last_25k") > 0))
+    print("nr races before filtering: ", races_df.height)
+    races_df = (races_df
+        .filter(pl.col("profile_score") != -1)
+        .filter(pl.col("profile_score_last_25k") != -1)
+        .filter(pl.col("final_km_percentage") != -1)
+    )   
+    print("nr races after filtering: ", races_df.height)
+    return races_df
 
-    knn = 10
-    results_similarity_with_profile = (results_similarity
-        .join(
-            profile_score_races.select(
-                [
-                    pl.col("race_id").alias("race_id_2"), 
-                    pl.col("profile_score").alias("profile_score_2"), 
-                    pl.col("profile_score_last_25k").alias("profile_score_last_25k_2"), 
-                ]
-            ),
-            on = "race_id_2",
-            how = "inner"
-        )
-        .sort("rbo_score", descending=True)
-        .group_by("race_id_1")
-        .head(knn)
-        .with_columns(
-            pl.col("rbo_score").sum().over("race_id_1").alias("rbo_score_sum")
-        )
-    )
-    interpolated_profile_scores = results_similarity_with_profile.group_by("race_id_1").agg(
-        ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_2"))
-        .sum().alias("interpolated_profile_score"),
-        ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_last_25k_2"))
-        .sum().alias("interpolated_profile_score_last_25k")
-    )
+    # profile_score_races = races_df.filter((pl.col("profile_score") > 0) & (pl.col("profile_score_last_25k") > 0))
 
-    interpolated_races = races_df.join(
-        interpolated_profile_scores.select([
-            pl.col("race_id_1").alias("race_id"),
-            "interpolated_profile_score",
-            "interpolated_profile_score_last_25k"
-        ]),
-        on = "race_id",
-        how = "left"
-    ).with_columns([
-        pl.when(pl.col("profile_score") == -1)
-        .then(pl.col("interpolated_profile_score"))
-        .otherwise(pl.col("profile_score"))
-        .alias("profile_score"),
-        pl.when(pl.col("profile_score_last_25k") == -1)
-        .then(pl.col("interpolated_profile_score_last_25k"))
-        .otherwise(pl.col("profile_score_last_25k"))
-        .alias("profile_score_last_25k"),
-    ]).drop("interpolated_profile_score", "interpolated_profile_score_last_25k")
+    # knn = 10
+    # results_similarity_with_profile = (results_similarity
+    #     .join(
+    #         profile_score_races.select(
+    #             [
+    #                 pl.col("race_id").alias("race_id_2"), 
+    #                 pl.col("profile_score").alias("profile_score_2"), 
+    #                 pl.col("profile_score_last_25k").alias("profile_score_last_25k_2"), 
+    #             ]
+    #         ),
+    #         on = "race_id_2",
+    #         how = "inner"
+    #     )
+    #     .sort("rbo_score", descending=True)
+    #     .group_by("race_id_1")
+    #     .head(knn)
+    #     .with_columns(
+    #         pl.col("rbo_score").sum().over("race_id_1").alias("rbo_score_sum")
+    #     )
+    # )
+    # interpolated_profile_scores = results_similarity_with_profile.group_by("race_id_1").agg(
+    #     ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_2"))
+    #     .sum().alias("interpolated_profile_score"),
+    #     ((pl.col("rbo_score") / pl.col("rbo_score_sum")) * pl.col("profile_score_last_25k_2"))
+    #     .sum().alias("interpolated_profile_score_last_25k")
+    # )
 
-    interpolated_races = interpolated_races.filter(
-        (pl.col("profile_score") > 0) & (pl.col("profile_score_last_25k") > 0)
-    ) #filter out if still missing profile scores
+    # interpolated_races = races_df.join(
+    #     interpolated_profile_scores.select([
+    #         pl.col("race_id_1").alias("race_id"),
+    #         "interpolated_profile_score",
+    #         "interpolated_profile_score_last_25k"
+    #     ]),
+    #     on = "race_id",
+    #     how = "left"
+    # ).with_columns([
+    #     pl.when(pl.col("profile_score") == -1)
+    #     .then(pl.col("interpolated_profile_score"))
+    #     .otherwise(pl.col("profile_score"))
+    #     .alias("profile_score"),
+    #     pl.when(pl.col("profile_score_last_25k") == -1)
+    #     .then(pl.col("interpolated_profile_score_last_25k"))
+    #     .otherwise(pl.col("profile_score_last_25k"))
+    #     .alias("profile_score_last_25k"),
+    # ]).drop("interpolated_profile_score", "interpolated_profile_score_last_25k")
 
-    return interpolated_races
+    # interpolated_races = interpolated_races.filter(
+    #     (pl.col("profile_score") > 0) & (pl.col("profile_score_last_25k") > 0)
+    # ) #filter out if still missing profile scores
+
+    # return interpolated_races
 
 import numpy as np
 
@@ -260,7 +268,7 @@ RACE_SIMILARITY_COLS = [
     "elevation_m", 
     "profile_score",
     "profile_score_last_25k",
-    # final km percentage #TODO: scrape from data
+    "final_km_percentage"
 ]
 def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
     """
@@ -433,7 +441,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         "elevation_m",
         "profile_score",
         "profile_score_last_25k",
-        # final km percentage #TODO: scrape from data
+        "final_km_percentage",
         # "classification",
         "startlist_score",
         "month"
@@ -445,7 +453,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     }
     rank_thresholds = [
         25,
-        10,
+        5,
         # 3
     ]
     #create feature for every comb of window, win_count and race_features
@@ -539,33 +547,6 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     return results_pre_embed_features
 
 
-RANK_POINTS_DICT = {
-    1: 100,
-    2: 80,
-    3: 65,
-    4: 55,
-    5: 45,
-    6: 40,
-    7: 35,
-    8: 30,
-    9: 25,
-    10: 20,
-    11: 18,
-    12: 16,
-    13: 14,
-    14: 12,
-    15: 10,
-    16: 9,
-    17: 8,
-    18: 7,
-    19: 6,
-    20: 5,
-    21: 4,
-    22: 3,
-    23: 2,
-    24: 1
-}
-
 from sklearn.decomposition import PCA
 def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.DataFrame, results_df: pl.DataFrame) -> pl.DataFrame:
     #create embeddings from pre-embed features
@@ -653,7 +634,8 @@ def add_embedding_similarity_to_results_df(
     )
 
 def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> pl.DataFrame:
-    
+
+    # -------- individual strength features ----------
     windows = {
         "1110d": 1110,
         "370d": 370,
@@ -701,6 +683,16 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     for d in dfs:
         results = results.join(d, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
 
+    # -------- team features ----------
+    #top 10 is 2.5 times harder than top 25, top 3 is 8.3 times harder than top 25, so we can weight them accordingly
+    #but dont count doubles
+    results = results.with_columns(
+        (pl.col("nr_top25_370d") + (2.5 - 1) * pl.col("nr_top10_370d") + (8.33 - 1 - 1.5) * pl.col("nr_top3_370d"))
+        .alias("strength")
+    )
+    results = results.with_columns(
+        pl.col("strength").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
+    )
     return results
 
 """*****************************************************
@@ -787,13 +779,13 @@ def clean_rider_stats():
 def check_rider_stats():
     pass
 
-# def create_normalized_race_data():
-#     races_df = pl.read_parquet("data_v2/races_df.parquet")
-#     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-#     results_similarity = create_results_similarity(results_df)
-#     interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
-#     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
-#     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
+def create_normalized_race_data():
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    # results_similarity = create_results_similarity(results_df)
+    interpolated_races_df = interpolate_profile_scores(races_df=races_df)
+    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
+    normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
 def main():
     """create features dataframe"""
@@ -847,7 +839,7 @@ def assert_embedding_similarity():
 
 
 if __name__ == "__main__":
-    # create_normalized_race_data()
+    create_normalized_race_data()
     main()
     # assert_embedding_dimension()
     # assert_embedding_similarity()

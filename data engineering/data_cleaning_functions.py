@@ -10,6 +10,7 @@ from soup_parsing_functions import *
 def filter_stats(stats: dict, race_url) -> dict:
     stats = {
         "startlist_score": stats["Startlist quality score"],
+        "final_km_percentage": stats["Gradient final km"],
         "heigh_meters": stats["Vertical meters"],
         "date": datetime.strptime(stats["Date"], "%d %B %Y"), #or Datename aswell sometimes?
         "distance": stats["Distance"].split(" ")[0],
@@ -35,6 +36,7 @@ def filter_stats(stats: dict, race_url) -> dict:
         "year": stats.get("year"),
         "stage": stats.get("stage"),
         "classification": classification,
+        "final_km_percentage": float(stats.get("final_km_percentage", "-1%")[:-1]),
         "distance_km": stats.get("distance") if stats.get("distance") else "-1",
         "elevation_m": stats.get("heigh_meters") if stats.get("heigh_meters") else "-1",
         "avg_speed_kmh": stats.get("speed").replace(" km/h", "") if stats.get("speed") else "-1",

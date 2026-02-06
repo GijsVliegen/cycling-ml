@@ -64,26 +64,31 @@ def download_page(url: str, output_dir=html_storage_dir) -> str:
 
     return filepath, []
 
-def load_soup_from_http(url: str) -> BeautifulSoup:
+def load_soups_from_http(url: str | list[str]) -> list[BeautifulSoup]:
     global driver
     # print(f"Loading page: {url}")
-    driver.get(url)
-    WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.TAG_NAME, "body"))
-    )
-    soup = BeautifulSoup(driver.page_source, "lxml")
+    soups = []
+    if isinstance(url, str):
+        url = [url]
+    for single_url in url:
+        driver.get(single_url)
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+        soup = BeautifulSoup(driver.page_source, "lxml")
+        soups.add(soup)
     # print(f"Souped page: {url}")
     # driver.close()
     # driver.switch_to.new_window("tab")
-    driver.delete_all_cookies()
-    driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
-    time.sleep(1) #be nice
-    driver.close()
-    driver.quit()
-    driver = webdriver.Chrome(service=Service(), options=options)
-    time.sleep(1) #be nice
-    # print(f"closed driver for page: {url}")
-    return soup
+        driver.delete_all_cookies()
+        driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
+        time.sleep(1) #be nice
+        driver.close()
+        driver.quit()
+        driver = webdriver.Chrome(service=Service(), options=options)
+        time.sleep(1) #be nice
+        # print(f"closed driver for page: {url}")
+    return soups
 
 def load_soup_from_file(url: str, output_dir=html_storage_dir) -> BeautifulSoup:
     filename = url_to_filename(url)
