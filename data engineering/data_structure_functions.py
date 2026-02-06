@@ -295,7 +295,7 @@ def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -
 
     return races_df, results_df, logs
 
-def parse_new_race_to_dict(race_name, stage_nr = 1) -> tuple[dict, list[str]]:
+def parse_new_race_to_dict(race_name, stage_nr = -1) -> tuple[dict, list[str]]:
     logs = []
     if stage_nr > 0:
         race_url = f"{BASE_URL}/race/{race_name}/2026/stage-{stage_nr}"

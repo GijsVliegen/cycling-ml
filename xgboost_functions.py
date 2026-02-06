@@ -48,41 +48,28 @@ class RaceModel:
         # 0-4: name ┆ year ┆ score ┆ rank ┆ Onedayraces ┆ 
         # 5-9: GC ┆ TT ┆ Sprint ┆ Climber ┆ Hills
 
+        self.embed_features = [
+            f"embed_{i}"
+            for i in range(1, 17)
+        ]
         self.rider_result_features = [
             # 'specialty', #needs to be encoded
             # 'team',
             'age',
-            'odr_1110d',
-            'gc_1110d',
-            'tt_1110d',
-            'sprint_1110d',
-            'climber_1110d',
-            'hills_1110d',
             'nr_races_participated_1110d',
             'nr_top25_1110d',
             'nr_top10_1110d',
             'nr_top3_1110d',
-            'odr_370d',
-            'gc_370d',
-            'tt_370d',
-            'sprint_370d',
-            'climber_370d',
-            'hills_370d',
             'nr_races_participated_370d',
             'nr_top25_370d',
             'nr_top10_370d',
             'nr_top3_370d',
-            'odr_40d',
-            'gc_40d',
-            'tt_40d',
-            'sprint_40d',
-            'climber_40d',
-            'hills_40d',
             'nr_races_participated_40d',
             'nr_top25_40d',
             'nr_top10_40d',
-            'nr_top3_40d'
-        ]
+            'nr_top3_40d',
+            "cosine_similarity"
+        ] + self.embed_features
         self.rider_yearly_features = [
             "points",
             "racedays",
@@ -99,13 +86,7 @@ class RaceModel:
             # "classification", #needs to be encoded
             "year",
             "startlist_score", #Check present in pairs
-            "avg_Onedayraces",
-            "avg_GC",
-            "avg_TT",
-            "avg_Sprint",
-            "avg_Climber",
-            "avg_Hills",
-        ]      
+        ] + self.embed_features
 
     def save_model(self) -> None:
         self.bst.save_model("data_v2/xgboost_model.json")
@@ -535,14 +516,27 @@ class RaceModel:
 def train():
     riders_data = pl.read_parquet("data_v2/rider_stats_df.parquet")
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-    races_features_df = pl.read_parquet("data_v2/races_features_df.parquet")
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+
+    results_features = results_embedded_df.join(
+        result_features_df,
+        on = ["race_id", "name"],
+        how="left"
+    )
+    races_features = races_embedded_df.join(
+        races_df,
+        on = ["race_id"],
+        how="left"
+    )
     model = RaceModel()
     model.train_model(
         riders_data=riders_data, 
-        result_features_df=result_features_df, 
+        result_features_df=results_features, 
         riders_yearly_data=riders_yearly_data, 
-        races_features_df=races_features_df)
+        races_features_df=races_features)
     model.save_model()
 
 
@@ -587,8 +581,8 @@ def predict():
     )
 
 def main():
-    train()
-    # predict()
+    # train()
+    predict()
 
 if __name__ == "__main__":
     main()

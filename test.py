@@ -79,6 +79,34 @@ def test_results_features():
 
     print(result)
 
+def test_pre_embed_features():
+
+    test_races_df = pl.DataFrame({
+        "name": ["test_race"] * 5 + ["test_GC_race"] * 6,
+        "date": ["2025-01-01", "2024-01-01", "2023-01-01", "2022-01-01", "2021-01-01"]
+            + ["2025-02-01", "2025-02-02", "2023-02-01", "2023-02-02", "2021-02-01", "2021-02-02"] , 
+        "classification": ["1.1"] * 5 + ["2.UWT"] * 6,
+        "startlist_score": list(range(11)),
+        "year": [2025, 2024, 2023, 2022, 2021] + [2025, 2025, 2023, 2023, 2021, 2021],
+        "race_id": ["1" , "2", "3", "4", "5"] + ["11" , "12", "13", "14", "15", "16"],
+        "distance_km": list(range(11)),
+        "elevation_m": list(range(1, 22, 2)),
+        "profile_score": list(range(1, 88, 8)),
+        "profile_score_last_25k": list(range(1, 44, 4)),
+    })
+    test_results_df = pl.DataFrame({
+        "race_id": ["1", "1", "2", "2", "3", "3", "4", "4", "5", "5"]
+        + ["11", "11", "12", "12", "13", "13", "14", "14", "15", "15", "16", "16"],
+        "name": ["Rider A", "Rider B"] * 11,
+        "rank": [1, 2] * 4 + [1, 25] * 1 + [1, 2] * 3 + [1, 25] * 3,
+    })
+    pre_embed_features = create_result_features_pre_embed(
+        results=test_results_df,
+        races=test_races_df,
+    )
+    print(pre_embed_features)
+
 if __name__ == "__main__":
     # test_races_features()
-    test_results_features()
+    # test_results_features()
+    test_pre_embed_features()

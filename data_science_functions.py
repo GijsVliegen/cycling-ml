@@ -8,6 +8,8 @@ import itertools
 from pprint import pprint
 from typing import List, Dict
 
+from sklearn.discriminant_analysis import StandardScaler
+
 """ Similarity based on type of race
 
 -> average global scores of riders to determine for a race
@@ -75,62 +77,62 @@ def normalize_race_data(races_df: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
-def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
-    top25 = (
-        races_df.sort("rank")
-        .group_by("race_id")
-        .agg(
-            pl.col("name").filter(pl.col("rank") < 25).alias("top_25_names")
-        )
-    )
-    # print(top25)
+# def create_results_similarity(races_df: pl.DataFrame) -> pl.DataFrame:
+#     top25 = (
+#         races_df.sort("rank")
+#         .group_by("race_id")
+#         .agg(
+#             pl.col("name").filter(pl.col("rank") < 25).alias("top_25_names")
+#         )
+#     )
+#     # print(top25)
 
-    df_pandas = top25.to_pandas() #TODO: use polars
+#     df_pandas = top25.to_pandas() #TODO: use polars
      
-    # Get all unique race_ids and their corresponding lists
-    races = df_pandas["race_id"].tolist()
-    lists = df_pandas["top_25_names"].tolist()
+#     # Get all unique race_ids and their corresponding lists
+#     races = df_pandas["race_id"].tolist()
+#     lists = df_pandas["top_25_names"].tolist()
 
-    # Calculate pairwise combinations
-    pairs = list(itertools.combinations(range(len(races)), 2))
-    # len(pairs) = len(races) * (len(races)-1) / 2
+#     # Calculate pairwise combinations
+#     pairs = list(itertools.combinations(range(len(races)), 2))
+#     # len(pairs) = len(races) * (len(races)-1) / 2
 
-    # print(len(pairs))
-    # print(len(races))
-    # Calculate RBO scores for all pairs
-    results = [0] * len(pairs) * 2
-    # print(len(results))
+#     # print(len(pairs))
+#     # print(len(races))
+#     # Calculate RBO scores for all pairs
+#     results = [0] * len(pairs) * 2
+#     # print(len(results))
     
-    for index, (i, j) in enumerate(pairs):
-        # print( index * 2)
-        race_i = races[i]
-        race_j = races[j]
-        list_i = lists[i]
-        list_j = lists[j]
+#     for index, (i, j) in enumerate(pairs):
+#         # print( index * 2)
+#         race_i = races[i]
+#         race_j = races[j]
+#         list_i = lists[i]
+#         list_j = lists[j]
 
-            # Handle empty lists
-        # if list_i is None or list_j is None:
-        #     rbo_score = 0.0
-        #     print(f"empty list for {race_i} vs {race_j}")
-        rbo_score = rbo.RankingSimilarity(list_i, list_j).rbo(p=0.9) #TODO: check out the p value
-        results[index * 2] = { #pair (a, b)
-            'race_id_1': race_i,
-            'race_id_2': race_j,
-            'rbo_score': rbo_score,
-            'list_1_length': len(list_i) if list_i is not None else 0,
-            'list_2_length': len(list_j) if list_j is not None else 0
-        }
-        results[index * 2 + 1] = { #pair (b, a)
-            'race_id_1': race_j,
-            'race_id_2': race_i,
-            'rbo_score': rbo_score,
-            'list_1_length': len(list_j) if list_j is not None else 0,
-            'list_2_length': len(list_i) if list_i is not None else 0
-        }
-    assert not any([r == 0 for r in results])
+#             # Handle empty lists
+#         # if list_i is None or list_j is None:
+#         #     rbo_score = 0.0
+#         #     print(f"empty list for {race_i} vs {race_j}")
+#         rbo_score = rbo.RankingSimilarity(list_i, list_j).rbo(p=0.9) #TODO: check out the p value
+#         results[index * 2] = { #pair (a, b)
+#             'race_id_1': race_i,
+#             'race_id_2': race_j,
+#             'rbo_score': rbo_score,
+#             'list_1_length': len(list_i) if list_i is not None else 0,
+#             'list_2_length': len(list_j) if list_j is not None else 0
+#         }
+#         results[index * 2 + 1] = { #pair (b, a)
+#             'race_id_1': race_j,
+#             'race_id_2': race_i,
+#             'rbo_score': rbo_score,
+#             'list_1_length': len(list_j) if list_j is not None else 0,
+#             'list_2_length': len(list_i) if list_i is not None else 0
+#         }
+#     assert not any([r == 0 for r in results])
 
-    # print(results)
-    return pl.DataFrame(results)
+#     # print(results)
+#     return pl.DataFrame(results)
 
 
 
@@ -258,6 +260,7 @@ RACE_SIMILARITY_COLS = [
     "elevation_m", 
     "profile_score",
     "profile_score_last_25k",
+    # final km percentage #TODO: scrape from data
 ]
 def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
     """
@@ -312,113 +315,118 @@ def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
     return closest_races_distance
 
 
-def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, riders: pl.DataFrame) -> pl.DataFrame:
-    riders = riders.select([
-        "name",
-        "Onedayraces",
-        "GC",
-        "TT",
-        "Sprint",
-        "Climber",
-        "Hills",
-    ])
-    top_results = results.select(["name", "race_id", "rank"]).join(
-        riders,
-        on="name",
-    ).filter(pl.col("rank") < 25)
-    race_avg_rider_stats = top_results.group_by("race_id").agg([
-        pl.col("Onedayraces").mean().alias("avg_Onedayraces"),
-        pl.col("GC").mean().alias("avg_GC"),
-        pl.col("TT").mean().alias("avg_TT"),
-        pl.col("Sprint").mean().alias("avg_Sprint"),
-        pl.col("Climber").mean().alias("avg_Climber"),
-        pl.col("Hills").mean().alias("avg_Hills"),
-    ])
+# def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, riders: pl.DataFrame) -> pl.DataFrame:
+#     riders = riders.select([
+#         "name",
+#         "Onedayraces",
+#         "GC",
+#         "TT",
+#         "Sprint",
+#         "Climber",
+#         "Hills",
+#     ])
+#     top_results = results.select(["name", "race_id", "rank"]).join(
+#         riders,
+#         on="name",
+#     ).filter(pl.col("rank") < 25)
+#     race_avg_rider_stats = top_results.group_by("race_id").agg([
+#         pl.col("Onedayraces").mean().alias("avg_Onedayraces"),
+#         pl.col("GC").mean().alias("avg_GC"),
+#         pl.col("TT").mean().alias("avg_TT"),
+#         pl.col("Sprint").mean().alias("avg_Sprint"),
+#         pl.col("Climber").mean().alias("avg_Climber"),
+#         pl.col("Hills").mean().alias("avg_Hills"),
+#     ])
+#     races = races.with_columns(
+#         pl.col("date").str.to_date()
+#     )
+#     race_avg_rider_stats = race_avg_rider_stats.join(
+#         races.select([
+#             pl.col("name").alias("race_name"),
+#             "race_id",
+#             "date",
+#             "classification"
+#         ]),
+#         on = "race_id"
+#     )
+#     """*****************************************************" 
+    
+#     Average rider stats over last 3 years for ONE DAY RACES
+
+#     *****************************************************"""
+#     race_avg_rider_stats_over_3y_ONE_DAY_RACES = race_avg_rider_stats.filter(
+#         ~ pl.col("classification").is_in(["2.Pro", "2.UWT"])
+#     ).with_columns(
+#         (pl.col("date") + pl.duration(days = 1109)).alias("_window_date")
+#     ).sort("_window_date").group_by_dynamic(
+#         index_column="_window_date",
+#         every="1d",
+#         period="1110d",
+#         offset="-1111d",
+#         label="left",
+#         group_by="race_name",
+#         # closed="left", #Cannot used closed when doing inference
+#         start_by="window"
+#     ).agg(
+#         pl.col("avg_Onedayraces").mean().alias("avg_Onedayraces"),
+#         pl.col("avg_GC").mean().alias("avg_GC"),
+#         pl.col("avg_TT").mean().alias("avg_TT"),
+#         pl.col("avg_Sprint").mean().alias("avg_Sprint"),
+#         pl.col("avg_Climber").mean().alias("avg_Climber"),
+#         pl.col("avg_Hills").mean().alias("avg_Hills"),
+#     )
+#     """*****************************************************" 
+    
+#     5 closest races in terms of kms, profile score, elevation, profile last 25k
+#     Within the same stage-race last 3 years. FOR STAGE RACES
+    
+#     *****************************************************"""
+#     closest_stage_races = get_closest_5_races_to_stage_race(
+#         races=races.filter(pl.col("classification").is_in(["2.Pro", "2.UWT"]))
+#     )
+#     race_avg_rider_stats_closest_stages = closest_stage_races.join(
+#         race_avg_rider_stats.rename(
+#             {"race_id": "race_id_right"}
+#         ),
+#         on = "race_id_right",
+#         how="left"
+#     )
+#     race_avg_rider_stats_over_3y_STAGES = race_avg_rider_stats_closest_stages.group_by(
+#         "race_id"
+#     ).agg(
+#         pl.col("avg_Onedayraces").mean().alias("avg_Onedayraces"),
+#         pl.col("avg_GC").mean().alias("avg_GC"),
+#         pl.col("avg_TT").mean().alias("avg_TT"),
+#         pl.col("avg_Sprint").mean().alias("avg_Sprint"),
+#         pl.col("avg_Climber").mean().alias("avg_Climber"),
+#         pl.col("avg_Hills").mean().alias("avg_Hills"),
+#     )
+
+#     races_STAGES = races.join(
+#         race_avg_rider_stats_over_3y_STAGES,
+#         on = ["race_id"],
+#         how="inner"
+#     )
+    
+#     races_ONE_DAY_RACES = races.join(
+#         race_avg_rider_stats_over_3y_ONE_DAY_RACES.rename({
+#             "race_name": "name",
+#             "_window_date": "date"
+#         }),
+#         on = ["name", "date"],
+#         how="inner"
+#     )
+#     races_features = pl.concat([races_STAGES, races_ONE_DAY_RACES]).unique()
+#     return races_features
+
+def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataFrame:
+    
     races = races.with_columns(
         pl.col("date").str.to_date()
     )
-    race_avg_rider_stats = race_avg_rider_stats.join(
-        races.select([
-            pl.col("name").alias("race_name"),
-            "race_id",
-            "date",
-            "classification"
-        ]),
-        on = "race_id"
-    )
-    """*****************************************************" 
-    
-    Average rider stats over last 3 years for ONE DAY RACES
-
-    *****************************************************"""
-    race_avg_rider_stats_over_3y_ONE_DAY_RACES = race_avg_rider_stats.filter(
-        ~ pl.col("classification").is_in(["2.Pro", "2.UWT"])
-    ).with_columns(
-        (pl.col("date") + pl.duration(days = 1109)).alias("_window_date")
-    ).sort("_window_date").group_by_dynamic(
-        index_column="_window_date",
-        every="1d",
-        period="1110d",
-        offset="-1111d",
-        label="left",
-        group_by="race_name",
-        # closed="left", #Cannot used closed when doing inference
-        start_by="window"
-    ).agg(
-        pl.col("avg_Onedayraces").mean().alias("avg_Onedayraces"),
-        pl.col("avg_GC").mean().alias("avg_GC"),
-        pl.col("avg_TT").mean().alias("avg_TT"),
-        pl.col("avg_Sprint").mean().alias("avg_Sprint"),
-        pl.col("avg_Climber").mean().alias("avg_Climber"),
-        pl.col("avg_Hills").mean().alias("avg_Hills"),
-    )
-    """*****************************************************" 
-    
-    5 closest races in terms of kms, profile score, elevation, profile last 25k
-    Within the same stage-race last 3 years. FOR STAGE RACES
-    
-    *****************************************************"""
-    closest_stage_races = get_closest_5_races_to_stage_race(
-        races=races.filter(pl.col("classification").is_in(["2.Pro", "2.UWT"]))
-    )
-    race_avg_rider_stats_closest_stages = closest_stage_races.join(
-        race_avg_rider_stats.rename(
-            {"race_id": "race_id_right"}
-        ),
-        on = "race_id_right",
-        how="left"
-    )
-    race_avg_rider_stats_over_3y_STAGES = race_avg_rider_stats_closest_stages.group_by(
-        "race_id"
-    ).agg(
-        pl.col("avg_Onedayraces").mean().alias("avg_Onedayraces"),
-        pl.col("avg_GC").mean().alias("avg_GC"),
-        pl.col("avg_TT").mean().alias("avg_TT"),
-        pl.col("avg_Sprint").mean().alias("avg_Sprint"),
-        pl.col("avg_Climber").mean().alias("avg_Climber"),
-        pl.col("avg_Hills").mean().alias("avg_Hills"),
-    )
-
-    races_STAGES = races.join(
-        race_avg_rider_stats_over_3y_STAGES,
-        on = ["race_id"],
-        how="inner"
-    )
-    
-    races_ONE_DAY_RACES = races.join(
-        race_avg_rider_stats_over_3y_ONE_DAY_RACES.rename({
-            "race_name": "name",
-            "_window_date": "date"
-        }),
-        on = ["name", "date"],
-        how="inner"
-    )
-    races_features = pl.concat([races_STAGES, races_ONE_DAY_RACES]).unique()
-    return races_features
-
-def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame) -> pl.DataFrame:
     races = races.with_columns(
-        pl.col("classification").cast(pl.Categorical)
+        pl.col("classification").cast(pl.Categorical),
+        pl.col("date").dt.month().alias("month")
     )
     race_features_to_bucket_on = [
         "distance_km",
@@ -427,8 +435,8 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         "profile_score_last_25k",
         # final km percentage #TODO: scrape from data
         # "classification",
-        # "startlist_score",
-        # "date", #str
+        "startlist_score",
+        "month"
         # "stage_or_one_day", #?
     ]
     windows = {
@@ -436,14 +444,12 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         # "370d": 370,
     }
     rank_thresholds = [
-        # 25,
-        10
+        25,
+        10,
+        # 3
     ]
     #create feature for every comb of window, win_count and race_features
 
-    races = races.with_columns(
-        pl.col("date").str.to_date()
-    )
     #create buckets:
     races_bucketed = races.with_columns(
         [
@@ -451,8 +457,8 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
             for c in race_features_to_bucket_on
         ]
     )
-    top_results = results.filter(pl.col("rank") <= 10)
-    results_bucketed = top_results.join(
+    # top_results = results.filter(pl.col("rank") <= 25)
+    results_bucketed = results.join(
         races_bucketed,
         on = "race_id",
         how= "inner"
@@ -460,28 +466,54 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     feature_creation_expressions = [
         # pl.when(pl.col("top_25_count").is_null() | (pl.col("top_25_count") == 0)).then(0).otherwise
         (
-            (pl.col(f"{bucket_feature}_bucket") == bucket)
+            (pl.col(f"{bucket_feature}_bucket") == bucket).sum()
             / (pl.len())
-        ).sum() 
+        )
         .alias(f"top_{rank_threshold}_in_{bucket_feature}_{bucket}")
         for bucket_feature in race_features_to_bucket_on
         for bucket in ["1", "2", "3"]
         for rank_threshold in rank_thresholds
     ] 
 
-    dfs = []
-
     results_bucketed_window_dates = results_bucketed.with_columns(
         [
             (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
             for label, offset in windows.items()
         ]
+    ).drop(
+        "rank",
+        "specialty",
+        "team",
+        "age",
+        "uci_pts",
+        "pcs_pts",
+        "name_right",
+        "year",
+        "stage",
+        "classification",
+        "distance_km",
+        "elevation_m",
+        "avg_speed_kmh",
+        "startlist_score",
+        "won_how",
+        "temp",
+        "profile_score",
+        "profile_score_last_25k",
     )
     results_bucketed_window_dates = results_bucketed_window_dates.sort("date")
     lf = results_bucketed_window_dates.lazy()
+    
+    results_pre_embed_features = results.join(
+        races.select(["race_id", "date"]),
+        on = "race_id",
+        how = "left"
+    ).select(
+        "name",
+        "date"
+    ).filter(pl.col("date").is_not_null()).unique()
     for label, _ in windows.items():
-        dfs.append(
-            lf.group_by_dynamic(
+
+        window_lf = lf.group_by_dynamic(
                 index_column=f"_window_date_{label}",
                 period=label,
                 offset= f"-{label}",
@@ -490,58 +522,22 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
                 start_by="window",
             ).agg(
                 feature_creation_expressions
-            ).rename({f"_window_date_{label}": "date"}).collect(streaming=True)
-        )
+            ).rename({
+                f"_window_date_{label}": "date"
+            }).collect(streaming=True)
+        window_lf = window_lf.rename({
+            col: f"f{col}_{label}"
+            for col in window_lf.columns
+            if col not in ["name", "date"]
+        })
+        results_pre_embed_features = results_pre_embed_features.join(
+            window_lf,
+            on=["name", "date"],
+            how="left"
+        ).fill_nan(0).fill_null(0)
+    
+    return results_pre_embed_features
 
-    race_type_points = dfs[0]
-    for d in dfs[1:]:
-        d = d.with_columns(
-
-        )
-        race_type_points = race_type_points.join(d, on=["name", "date"], how="left")
-        
-
-    #relativise over total top 25
-    return None
-    # results.with_columns(
-    #     (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
-    # ).group_by_dynamic(
-    #     index_column=f"_window_date_{label}",
-    #     period=label,
-    #     offset= f"-{label}",
-    #     every="1d",
-    #     group_by="name",
-    #     start_by="window",
-    # ).agg(
-    #     pl.sum(
-    #         pl.when(pl.col("rank") <= 25).then(1)
-    #         .otherwise(0)
-    #     ).alias("top_25_count")
-    #     pl.sum(
-    #         pl.when(pl.col("rank") <= 25).then(
-    #             pl.when(
-    #                 pl.col("distance_km_bucket") == 1
-    #             ).then(1)
-    #         ).otherwise(0)
-    #     )
-    #     pl.sum("odr_points").alias(f"odr_{label}"),
-    #     pl.sum("gc_points").alias(f"gc_{label}"),
-    #     pl.sum("tt_points").alias(f"tt_{label}"),
-    #     pl.sum("sprint_points").alias(f"sprint_{label}"),
-    #     pl.sum("climber_points").alias(f"climber_{label}"),
-    #     pl.sum("hills_points").alias(f"hills_{label}"),
-    #     pl.count("race_id").alias(f"nr_races_participated_{label}"),
-    #     (pl.when(pl.col("rank") < 25).then(1)
-    #         .otherwise(None)
-    #     ).sum().alias(f"nr_top25_{label}"),
-    #     (pl.when(pl.col("rank") < 10).then(1)
-    #         .otherwise(None)
-    #     ).sum().alias(f"nr_top10_{label}"),
-    #     (pl.when(pl.col("rank") < 3).then(1)
-    #         .otherwise(None)
-    #     ).sum().alias(f"nr_top3_{label}"),
-    # ).rename({f"_window_date_{label}": "date"})
-    pass
 
 RANK_POINTS_DICT = {
     1: 100,
@@ -569,27 +565,95 @@ RANK_POINTS_DICT = {
     23: 2,
     24: 1
 }
-def create_result_features_table(results: pl.DataFrame, races_features: pl.DataFrame) -> pl.DataFrame:
-    results_features = results.join(
-        races_features,
-        on="race_id",
-    )
-    race_type_points = results_features.with_columns(
-        pl.when(pl.col("rank") < 25)
-        .then(
-            pl.col("rank").replace(RANK_POINTS_DICT))
-        .otherwise(0).alias("rank_points"),
-    )
-    race_type_points = race_type_points.with_columns(
-        (pl.col("avg_Onedayraces") * pl.col("rank_points")).alias("odr_points"),
-        (pl.col("avg_GC") * pl.col("rank_points")).alias("gc_points"),
-        (pl.col("avg_TT") * pl.col("rank_points")).alias("tt_points"),
-        (pl.col("avg_Sprint") * pl.col("rank_points")).alias("sprint_points"),
-        (pl.col("avg_Climber") * pl.col("rank_points")).alias("climber_points"),
-        (pl.col("avg_Hills") * pl.col("rank_points")).alias("hills_points")
-    ).sort("date")
 
+from sklearn.decomposition import PCA
+def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.DataFrame, results_df: pl.DataFrame) -> pl.DataFrame:
+    #create embeddings from pre-embed features
+    feature_cols = [
+        col for col in pre_embed_features.columns
+        if col not in ["name", "date"]
+    ]
+    pre_embed_array = pre_embed_features.select(feature_cols).to_numpy()
+    pre_embed_array = StandardScaler().fit_transform(pre_embed_array)
 
+    pca = PCA(n_components=10)
+    embedded_array = pca.fit_transform(pre_embed_array)
+
+    #INSPECT WITH
+    # - pca.explained_variance_
+    # - np.cumsum(pca.explained_variance_ratio_)
+    
+    embedded_df = pl.DataFrame(embedded_array, schema=[f"embed_{i+1}" for i in range(embedded_array.shape[1])])
+    results_embedded = pl.concat([
+        pre_embed_features.select(["name", "date"]),
+        embedded_df
+    ], how="horizontal")
+    
+    results_embedded_df = results_embedded.join(
+        results_df.select(["name", "race_id"]).join(
+            races_df.select("race_id", pl.col("date").str.to_date()),
+            on = "race_id",
+            how="left"
+        ),
+        on = ["name", "date"],
+        how = "inner"
+    )
+    return results_embedded_df
+
+def create_races_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl.DataFrame:
+    #TODO: also average over multiple years?
+    results_embedded_df = results_embedded_df.join(
+        results_df.select(["name", "race_id", "rank"]).filter(pl.col("rank") < 25),
+        on = ["name", "race_id"],
+        how = "left"
+    )
+    races_embeddings = results_embedded_df.group_by("race_id").agg(
+        [
+            pl.col(f"embed_{i+1}").mean().alias(f"embed_{i+1}")
+            for i in range(len(results_embedded_df.columns) - 4)
+        ]
+    )
+    return races_embeddings
+
+def calculate_cosine_similarity_polars(df, n_dims=10):
+    # Build expressions for dot product
+    dot_product = pl.lit(0.0)
+    norm1_sq = pl.lit(0.0)
+    norm2_sq = pl.lit(0.0)
+    
+    for i in range(1, n_dims + 1):
+        col1 = f"embed_{i}"
+        col2 = f"embed_{i}_right"
+        
+        dot_product = dot_product + (pl.col(col1) * pl.col(col2))
+        norm1_sq = norm1_sq + (pl.col(col1) ** 2)
+        norm2_sq = norm2_sq + (pl.col(col2) ** 2)
+    
+    # Cosine similarity = dot_product / (norm1 * norm2)
+    cosine_sim = dot_product / (norm1_sq.sqrt() * norm2_sq.sqrt())
+    
+    return df.with_columns(cosine_sim.alias("cosine_similarity"))
+
+def add_embedding_similarity_to_results_df(
+    results_embedded_df: pl.DataFrame,
+    races_embedded_df: pl.DataFrame
+) -> pl.DataFrame:
+    
+    results_w_race_embeddings = results_embedded_df.join(
+        races_embedded_df,
+        on = "race_id",
+        how= "left",
+    )
+    embedding_similary = calculate_cosine_similarity_polars(results_w_race_embeddings)
+
+    return results_embedded_df.join(
+        embedding_similary.select(["name", 'race_id', "cosine_similarity"]),
+        on = ["name", 'race_id'],
+        how="left"
+    )
+
+def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> pl.DataFrame:
+    
     windows = {
         "1110d": 1110,
         "370d": 370,
@@ -597,10 +661,20 @@ def create_result_features_table(results: pl.DataFrame, races_features: pl.DataF
     }
 
     dfs = []
+    results = results.join(
+        races.select(["race_id", pl.col("date").str.to_date()]),
+        on = "race_id",
+        how = "left"
+    )
+    bare_results = results.select([
+        "name",
+        "date",
+        "rank"
+    ]).sort("date")
 
     for label, offset in windows.items():
         dfs.append(
-            race_type_points.with_columns(
+            bare_results.with_columns(
                 (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
             ).group_by_dynamic(
                 index_column=f"_window_date_{label}",
@@ -611,13 +685,7 @@ def create_result_features_table(results: pl.DataFrame, races_features: pl.DataF
                 start_by="window",
             )
             .agg(
-                pl.sum("odr_points").alias(f"odr_{label}"),
-                pl.sum("gc_points").alias(f"gc_{label}"),
-                pl.sum("tt_points").alias(f"tt_{label}"),
-                pl.sum("sprint_points").alias(f"sprint_{label}"),
-                pl.sum("climber_points").alias(f"climber_{label}"),
-                pl.sum("hills_points").alias(f"hills_{label}"),
-                pl.count("race_id").alias(f"nr_races_participated_{label}"),
+                pl.len().alias(f"nr_races_participated_{label}"),
                 (pl.when(pl.col("rank") < 25).then(1)
                     .otherwise(None)
                 ).sum().alias(f"nr_top25_{label}"),
@@ -630,18 +698,9 @@ def create_result_features_table(results: pl.DataFrame, races_features: pl.DataF
             ).rename({f"_window_date_{label}": "date"})
         )
     
-    race_type_points = dfs[0]
-    for d in dfs[1:]:
-        race_type_points = race_type_points.join(d, on=["name", "date"], how="left")
+    for d in dfs:
+        results = results.join(d, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
 
-    results = results.join(
-        races_features.select(["race_id", "date"]),
-        on="race_id"
-    ).join(
-        race_type_points,
-        on=["name", "date"],
-        how="left"
-    )
     return results
 
 """*****************************************************
@@ -728,13 +787,13 @@ def clean_rider_stats():
 def check_rider_stats():
     pass
 
-def create_normalized_race_data():
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
-    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    results_similarity = create_results_similarity(results_df)
-    interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
-    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
-    normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
+# def create_normalized_race_data():
+#     races_df = pl.read_parquet("data_v2/races_df.parquet")
+#     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+#     results_similarity = create_results_similarity(results_df)
+#     interpolated_races_df = interpolate_profile_scores(races_df=races_df, results_similarity=results_similarity)
+#     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
+#     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
 def main():
     """create features dataframe"""
@@ -742,7 +801,7 @@ def main():
 
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
-    riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    # riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
     normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
 
     # races_features_df = create_race_features_table(
@@ -752,16 +811,46 @@ def main():
     # )
     # races_features_df.write_parquet("data_v2/races_features_df.parquet") 
 
-    # result_features_df = create_result_features_table(results=results_df, races_features=races_features_df)
-    result_features_df = create_result_features_pre_embed(results=results_df, races=normalized_races_df)
+    result_features_df = create_result_features_table(results=results_df, races=races_df)
+    pre_embed_features_df = create_result_features_pre_embed(results=results_df, races=normalized_races_df)
+    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=results_df)
+    races_embedded_df = create_races_embeddings(
+        results_df = results_df,
+        results_embedded_df = results_embedded_df)
+    results_embedded_df = add_embedding_similarity_to_results_df(
+        results_embedded_df=results_embedded_df,
+        races_embedded_df=races_embedded_df,
+    )
+    # print(result_features_df.columns)
+    # print(len(result_features_df.columns))
     # print(result_features_df)
+    pre_embed_features_df.write_parquet("data_v2/pre_embed_features_df.parquet")
     result_features_df.write_parquet("data_v2/result_features_df.parquet")
 
+    results_embedded_df.write_parquet("data_v2/results_embedded_df.parquet")
+    races_embedded_df.write_parquet("data_v2/races_embedded_df.parquet")
+
+def assert_embedding_dimension():
+    pre_embed_features_df = pl.read_parquet("data_v2/pre_embed_features_df.parquet")
+
+    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=results_df)
+    
+def assert_embedding_similarity():
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    results_embedded_with_similarity = add_embedding_similarity_to_results_df(
+        results_embedded_df=results_embedded_df,
+        races_embedded_df=races_embedded_df,
+    )
 
 
 if __name__ == "__main__":
     # create_normalized_race_data()
     main()
+    # assert_embedding_dimension()
+    # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()
     # check_features_stats()

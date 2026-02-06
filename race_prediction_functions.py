@@ -2,30 +2,99 @@ import polars as pl
 from data_science_functions import RACE_SIMILARITY_COLS, RANK_POINTS_DICT, scores_to_probability_results
 
 
-def normalize_new_race_data(new_race: pl.DataFrame, old_races: pl.DataFrame) -> pl.DataFrame:
-    limits = old_races.select(
-        *[
-            pl.col(c).min().alias(f"{c}_min")
-            for c in RACE_SIMILARITY_COLS
-        ],
-        *[
-            pl.col(c).max().alias(f"{c}_max")
-            for c in RACE_SIMILARITY_COLS
-        ],
+# def normalize_new_race_data(new_race: pl.DataFrame, old_races: pl.DataFrame) -> pl.DataFrame:
+#     limits = old_races.select(
+#         *[
+#             pl.col(c).min().alias(f"{c}_min")
+#             for c in RACE_SIMILARITY_COLS
+#         ],
+#         *[
+#             pl.col(c).max().alias(f"{c}_max")
+#             for c in RACE_SIMILARITY_COLS
+#         ],
+#     )
+#     new_race_limits = new_race.join(limits, how="cross")
+#     new_race_normalized = new_race_limits.select(
+#         *[
+#             c for c in new_race.columns
+#             if c not in RACE_SIMILARITY_COLS
+#         ],
+#         *[
+#             (pl.col(c) - pl.col(f"{c}_min")) / (pl.col(f"{c}_max") - pl.col(f"{c}_min")).alias(c)
+#             for c in RACE_SIMILARITY_COLS
+#         ]
+#     )
+#     return new_race_normalized
+
+def get_new_race_embedding(
+    race_to_find_for: pl.DataFrame, 
+    old_embeddings: pl.DataFrame, 
+    old_races: pl.DataFrame
+) -> pl.DataFrame:
+    """
+    closest 5 races in the same (stage-)race over last 5 years
+
+    This function is total overkill since it can act on find for multiple races at once. 
+    """
+    duplicate_races = race_to_find_for.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+        old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
+        on = ["name"]
+    ).filter(
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
+    ).filter(
+        pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
+    ).filter(
+        ~ (pl.col("race_id") == pl.col("race_id_right"))
     )
-    new_race_limits = new_race.join(limits, how="cross")
-    new_race_normalized = new_race_limits.select(
+    #TODO years should be replaced by dates, so only earlier stages are taken
+    # not critical tho
+    duplicate_races_normalized = duplicate_races.with_columns(
         *[
-            c for c in new_race.columns
-            if c not in RACE_SIMILARITY_COLS
+            (
+                (pl.col(c) - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised")
+            for c in RACE_SIMILARITY_COLS
         ],
         *[
-            (pl.col(c) - pl.col(f"{c}_min")) / (pl.col(f"{c}_max") - pl.col(f"{c}_min")).alias(c)
+            (
+                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised_right")
             for c in RACE_SIMILARITY_COLS
         ]
     )
-    return new_race_normalized
+    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
+        (
+            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
+        ).alias(f"{c}_distance")
+        for c in RACE_SIMILARITY_COLS
+    ])
+    duplicate_races_distance = duplicate_races_distance_part.with_columns(
+        (pl.sum_horizontal([
+            pl.col(f"{c}_distance") 
+            for c in RACE_SIMILARITY_COLS
+        ])
+        ).sqrt().alias("total_distance")
+    )
+    closest_race_ids = duplicate_races_distance.sort(
+        "total_distance", descending=False
+    ).group_by("race_id").head(5).select("race_id", "race_id_right")
+    closest_embedding = closest_race_ids.join(
+        old_embeddings.rename({"race_id": "race_id_right"}),
+        on="race_id_right",
+        how="left"
+    ).group_by(
+        "race_id",
+    ).agg(
+        *[
+            pl.col(c).mean()
+            for c in old_embeddings.columns if c != "race_id"
+        ]
+    )
+    return closest_embedding
 
+    
 
 def get_new_race_features(old_races_features: pl.DataFrame, race_to_find_for: pl.DataFrame) -> pl.DataFrame:
     """
@@ -33,14 +102,6 @@ def get_new_race_features(old_races_features: pl.DataFrame, race_to_find_for: pl
 
     This function is total overkill since it can act on find for multiple races at once. 
     """
-    RACE_FEATURES = [
-        "avg_Onedayraces",
-        "avg_GC",
-        "avg_TT",
-        "avg_Sprint",
-        "avg_Climber",
-        "avg_Hills",
-    ] 
     duplicate_races = race_to_find_for.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
         old_races_features.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
         on = ["name"]
@@ -111,72 +172,37 @@ def get_rider_features(
         new_race: pl.DataFrame,
         startlist: pl.DataFrame, 
         results: pl.DataFrame, 
-        races_features: pl.DataFrame
+        races: pl.DataFrame
     ) -> pl.DataFrame:
-    participator_results = results.join(
-        startlist.select(pl.col("rider").alias("name")),
-        on="name"
-    )
-    participator_results_features = participator_results.join(
-        races_features,
-        on="race_id",
-    ).filter(
-        pl.col("year").cast(pl.Int64) >= 2016
-    )
-    startlist_with_data = startlist.rename({"rider": "name"}).join(
-        participator_results_features.select(
-            "name",
-            # "specialty",
-            "age"
-        ).unique(subset=["name"]),
-        on = "name",
-        how = "left"
-    )
 
-    participator_results_features_points = participator_results_features.with_columns(
-        (pl.when(pl.col("rank") < 25)
-        .then(
-            (pl.when(pl.col("rank") > 0)
-            .then(
-                pl.col("rank").replace(RANK_POINTS_DICT)
-            )
-            .otherwise(0))
-        )
-        .otherwise(0)).alias("rank_points"),
+    results_with_dates = results.join(
+        races.select(["race_id", pl.col("date").str.to_date()]),
+        on = "race_id",
+        how="left"
     )
-
-    participator_results_features_points = participator_results_features_points.with_columns(
-        (pl.col("avg_Onedayraces") * pl.col("rank_points")).alias("odr_points"),
-        (pl.col("avg_GC") * pl.col("rank_points")).alias("gc_points"),
-        (pl.col("avg_TT") * pl.col("rank_points")).alias("tt_points"),
-        (pl.col("avg_Sprint") * pl.col("rank_points")).alias("sprint_points"),
-        (pl.col("avg_Climber") * pl.col("rank_points")).alias("climber_points"),
-        (pl.col("avg_Hills") * pl.col("rank_points")).alias("hills_points")
-    ).sort("date")
+    startlist_results = startlist.rename({"rider": "name"}).join(
+        results_with_dates,
+        on = "name"
+    )
 
     windows = {
         "1110d": 1110,
         "370d": 370,
         "40d": 40,
     }
-    participator_results_features_points = participator_results_features_points.join(
+    startlist_results = startlist_results.join(
         new_race.select(pl.col("date").str.to_date().alias("new_race_date")),
         how="cross"
     )
+
     dfs = []
     for label, offset in windows.items():
         dfs.append(
-            participator_results_features_points.filter(
+            startlist_results.filter(
                 pl.col("date") >= (pl.col("new_race_date") - pl.duration(days = (offset - 1)))
             ).group_by(
                 "name"
             ).agg(
-                pl.sum("odr_points").alias(f"odr_{label}"),
-                pl.sum("gc_points").alias(f"gc_{label}"),
-                pl.sum("tt_points").alias(f"tt_{label}"),
-                pl.sum("sprint_points").alias(f"sprint_{label}"),
-                pl.sum("climber_points").alias(f"climber_{label}"),
-                pl.sum("hills_points").alias(f"hills_{label}"),
                 pl.count("race_id").alias(f"nr_races_participated_{label}"),
                 (pl.when(pl.col("rank") < 25).then(1)
                     .otherwise(None)
@@ -189,17 +215,31 @@ def get_rider_features(
                 ).sum().alias(f"nr_top3_{label}"),
             )
         )
-    rider_features = startlist_with_data.join(
+    rider_features = startlist.join(
         new_race.select("race_id"),
         how="cross"
-    )
+    ).rename({"rider": "name"})
     for df in dfs:
+        if len(df) == 0:
+            continue
         rider_features = rider_features.join(
             df,
             on="name",
             how="left"
         ).fill_null(0)
     return rider_features
+
+def get_rider_embeddings(startlist: pl.DataFrame, results_embedded_df: pl.DataFrame) -> pl.DataFrame:
+    most_recent_embedding_date = results_embedded_df.sort("date").with_columns(
+        pl.col("date").last().over("name").alias("most_recent_date")
+    )
+    most_recent_embedding = most_recent_embedding_date.filter(pl.col("date") == pl.col("most_recent_date"))
+    
+    return startlist.rename({"rider": "name"}).select("name").join(
+        most_recent_embedding,
+        on="name",
+        how="left"
+    ).drop("date", "most_recent_date", "cosine_similarity", "race_id")
 
 def get_rider_pairs(rider_features_df: pl.DataFrame) -> list[list[str, str]]:
     """
@@ -220,6 +260,24 @@ def get_rider_pairs(rider_features_df: pl.DataFrame) -> list[list[str, str]]:
         .to_list()
     )
     return pairs_list
+
+from data_science_functions import calculate_cosine_similarity_polars
+def add_embedding_similarity_for_new_race(
+    rider_embeddings: pl.DataFrame, 
+    race_embedding: pl.DataFrame
+) -> pl.DataFrame:
+
+    results_w_race_embeddings = rider_embeddings.join(
+        race_embedding,
+        how= "cross",
+    )
+    embedding_similary = calculate_cosine_similarity_polars(results_w_race_embeddings)
+
+    return rider_embeddings.join(
+        embedding_similary.select(["name", "cosine_similarity"]),
+        on = ["name"],
+        how="left"
+    )
 
 import numpy as np
 
@@ -273,9 +331,9 @@ def main():
     race_stats_df = pl.read_parquet("data_v2/new_race_stats.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     results_df = pl.read_parquet("data_v2/results_df.parquet")
-    races_features_df = pl.read_parquet("data_v2/races_features_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     """Prepare data of race and riders to give to xgboost"""
 
     # new_race_normalized = normalize_new_race_data(
@@ -283,15 +341,37 @@ def main():
     #     old_races = races_df #use non normalized to normalize
     # )
 
-    race_feats = get_new_race_features(
-        old_races_features = races_features_df,
-        race_to_find_for=race_stats_df
+    # race_feats = get_new_race_features(
+    #     old_races_features = races_features_df,
+    #     race_to_find_for=race_stats_df
+    # )
+    race_embedding = get_new_race_embedding(
+        race_to_find_for = race_stats_df,
+        old_embeddings = races_embedded_df,
+        old_races = races_df,
+    )
+    race_feats = race_embedding.join(
+        race_stats_df,
+        on = ["race_id"],
+        how="left"
     )
     rider_feats = get_rider_features(
         new_race=race_stats_df,
         startlist=startlist_df,
         results = results_df,
-        races_features=races_features_df
+        races=races_df
+    )
+    rider_embeddings = get_rider_embeddings(
+        startlist = startlist_df,
+        results_embedded_df = results_embedded_df
+    )
+    rider_embeddings = add_embedding_similarity_for_new_race(
+        rider_embeddings=rider_embeddings,
+        race_embedding=race_embedding,
+    )
+    rider_feats = rider_feats.join(
+        rider_embeddings,
+        on="name"
     )
 
     """Use prepared data to generate inter-rider results"""
