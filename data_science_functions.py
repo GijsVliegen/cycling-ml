@@ -227,12 +227,12 @@ def scores_to_probability_results(rider_scores: pl.DataFrame) -> pl.DataFrame:
         # weights = np.exp(scores)
         # current_probs = weights / weights.sum()
         current_probs = [
-            s / total_sum if s > 0 else 0 
+            s / total_sum if s > 0 else 0.0
             for s in scores
         ]
         rank_probs = {1: current_probs.copy()}
         for pos in range(2, max_rank_to_predict + 1):
-            new_probs = [0.0] * n
+            new_probs = [float(0.0)] * n
             for i in range(n):
                 if scores[i] == 0:
                     continue
@@ -250,7 +250,7 @@ def scores_to_probability_results(rider_scores: pl.DataFrame) -> pl.DataFrame:
     rank_probs = compute_plackett_luce_probs(scores)
     for k in range(1, len(rank_probs) + 1):
         rider_scores = rider_scores.with_columns(
-            pl.Series(f"rank_{k}_prob", rank_probs[k])
+            pl.Series(f"rank_{k}_prob", rank_probs[k]), strict = False
         )
 
     return rider_scores
@@ -687,11 +687,11 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     #top 10 is 2.5 times harder than top 25, top 3 is 8.3 times harder than top 25, so we can weight them accordingly
     #but dont count doubles
     results = results.with_columns(
-        (pl.col("nr_top25_370d") + (2.5 - 1) * pl.col("nr_top10_370d") + (8.33 - 1 - 1.5) * pl.col("nr_top3_370d"))
-        .alias("strength")
+        [(pl.col(f"nr_top25_{label}") + (2.5 - 1) * pl.col(f"nr_top10_{label}") + (8.33 - 1 - 1.5) * pl.col(f"nr_top3_{label}"))
+        .alias(f"strength_{label}") for label in windows.keys()]
     )
     results = results.with_columns(
-        pl.col("strength").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
+        pl.col("strength_370d").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
     )
     return results
 
@@ -782,8 +782,11 @@ def check_rider_stats():
 def create_normalized_race_data():
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    necessary_races = races_df.filter(
+        pl.col("startlist_score") > 200
+    )
     # results_similarity = create_results_similarity(results_df)
-    interpolated_races_df = interpolate_profile_scores(races_df=races_df)
+    interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
@@ -793,9 +796,17 @@ def main():
 
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
+    necessary_races = races_df.filter(
+        pl.col("startlist_score") > 200
+    )
     # riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    necessary_results = results_df.join(
+        necessary_races.select("race_id"),
+        on = "race_id",
+        how = "inner"
+    )
+    
     normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
-
     # races_features_df = create_race_features_table(
     #     races=races_df, 
     #     results=results_df,
@@ -803,11 +814,11 @@ def main():
     # )
     # races_features_df.write_parquet("data_v2/races_features_df.parquet") 
 
-    result_features_df = create_result_features_table(results=results_df, races=races_df)
-    pre_embed_features_df = create_result_features_pre_embed(results=results_df, races=normalized_races_df)
-    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=results_df)
+    result_features_df = create_result_features_table(results=necessary_results, races=races_df)    
+    pre_embed_features_df = create_result_features_pre_embed(results=necessary_results, races=normalized_races_df)
+    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=necessary_results)
     races_embedded_df = create_races_embeddings(
-        results_df = results_df,
+        results_df = necessary_results,
         results_embedded_df = results_embedded_df)
     results_embedded_df = add_embedding_similarity_to_results_df(
         results_embedded_df=results_embedded_df,
@@ -828,7 +839,8 @@ def assert_embedding_dimension():
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=results_df)
-    
+    breakpoint()
+
 def assert_embedding_similarity():
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
@@ -836,12 +848,13 @@ def assert_embedding_similarity():
         results_embedded_df=results_embedded_df,
         races_embedded_df=races_embedded_df,
     )
+    breakpoint()
 
 
 if __name__ == "__main__":
-    create_normalized_race_data()
-    main()
-    # assert_embedding_dimension()
+    # create_normalized_race_data()
+    # main()
+    assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()

@@ -50,24 +50,27 @@ class RaceModel:
 
         self.embed_features = [
             f"embed_{i}"
-            for i in range(1, 17)
+            for i in range(1, 11)
         ]
         self.rider_result_features = [
             # 'specialty', #needs to be encoded
             # 'team',
-            'age',
+            # 'age',
             'nr_races_participated_1110d',
             'nr_top25_1110d',
             'nr_top10_1110d',
             'nr_top3_1110d',
+            "strength_1110d",
             'nr_races_participated_370d',
             'nr_top25_370d',
             'nr_top10_370d',
             'nr_top3_370d',
+            "strength_370d",
             'nr_races_participated_40d',
             'nr_top25_40d',
             'nr_top10_40d',
             'nr_top3_40d',
+            "strength_40d",
             "cosine_similarity"
         ] + self.embed_features
         self.rider_yearly_features = [
@@ -160,6 +163,7 @@ class RaceModel:
         races_features_df: pl.DataFrame,
     ) -> np.ndarray:
 
+
         X = []
         y = []
         X_weights = []
@@ -188,10 +192,10 @@ class RaceModel:
             race_Y = np.random.choice([-1, 1], size=(len(rider_pairs),))
 
             rider_pair_features = self.get_rider_pair_features(
-                rider_pairs=rider_pairs,
+                rider_pairs = rider_pairs,
                 result_features_df = result_features_df,
                 riders_yearly_data = riders_yearly_data,
-                race_year=race_year,
+                race_year = race_year,
                 race_id = race_id,
                 race_Y=race_Y
             )
@@ -298,7 +302,7 @@ class RaceModel:
 
         yearly_feature_cols = rider_0_yearly_data - rider_1_yearly_data
 
-        feature_cols = rider_0_data - rider_1_data
+        feature_cols = np.hstack([rider_0_data, rider_1_data])
         if feature_cols.shape[0] != yearly_feature_cols.shape[0]:
             raise ValueError("Feature columns shape does not match number of rider pairs")
         all_feat_cols = np.hstack([feature_cols, yearly_feature_cols])
@@ -324,24 +328,24 @@ class RaceModel:
 
         top_riders = result_features_df.filter(
             pl.col("race_id") == race_id
-        ).sort("rank").head(min_top_rank)
+        ).sort("rank").head(25)
         all_riders = result_features_df.filter(
             pl.col("race_id") == race_id
-        ).sort("rank")            
-        pairs = set()
+        )         
+        pairs = []
         weights = []
         for i, top_rider in enumerate(top_riders["name"]):
             for j, other_rider in enumerate(all_riders["name"]):
                 if i < j:
                     if (top_rider, other_rider) not in pairs:
-                        pairs.add((top_rider, other_rider))
+                        pairs.append((top_rider, other_rider))
                         """Weights explained:
                         - abs(i,j) -> larger distance should be easier to guess so more weight to these
                         - nr_riders - i -> predicting first place more important"""
                     # if i == 10 and j :
                         # print(1 + (nr_riders - i)*(nr_riders - abs(i-j)))
                         weights.append(1 + (nr_riders - i)*(nr_riders - abs(i-j))) 
-        return list(pairs), weights
+        return pairs, weights
 
     def get_rider_pair_win_diff(self, rider_0: str, rider_1: str, race_data: pl.DataFrame) -> int:
         #filter race_data on rider names
@@ -451,7 +455,6 @@ class RaceModel:
 
     def train_model(
             self, 
-            riders_data: pl.DataFrame, 
             result_features_df: pl.DataFrame, 
             riders_yearly_data: pl.DataFrame,
             races_features_df: pl.DataFrame
@@ -473,48 +476,47 @@ class RaceModel:
             )
         print("Model fitted")
 
-    def predict_race(self, riders_data: pl.DataFrame, result_features_df: pl.DataFrame, riders_yearly_data: pl.DataFrame,race_id: str):
-        rider_pairs, _ = self.get_rider_pairs_weights(
-            race_id = race_id,
-            result_features_df = result_features_df,
-            min_top_rank = None
-        )
-        race_year = result_features_df.filter(
-            pl.col("race_id") == race_id
-        ).select("year").to_numpy()[0][0]
-        race_Y = np.ones(len(rider_pairs))  #dummy Y
-        rider_features = self.get_rider_pair_features(
-            rider_pairs = rider_pairs,
-            riders_data = riders_data,
-            riders_yearly_data=riders_yearly_data,
-            race_year = race_year,
-            race_Y = race_Y
-        )
-        dtest = xgb.DMatrix(rider_features, label=race_Y)
-        y_pred_proba = self.bst.predict(dtest)
-        # pair_outcomes = self.bst.predict(rider_features)  #probability that rider 0 wins
-        riders = set(
-            [rider for pair in rider_pairs for rider in pair]
-        )
-        rider_scores = {
-            rider: [] for rider in riders
-        }
-        for (first, second), pred_y in zip(rider_pairs, y_pred_proba):
-            rider_scores[first].append(pred_y)
-            rider_scores[second].append( - pred_y)
-        rider_scores = {
-            rider: np.sum(scores) for rider, scores in rider_scores.items()
-        }
-        top10 = sorted(rider_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+    # def predict_race(self, result_features_df: pl.DataFrame, riders_yearly_data: pl.DataFrame,race_id: str):
+    #     rider_pairs, _ = self.get_rider_pairs_weights(
+    #         race_id = race_id,
+    #         result_features_df = result_features_df,
+    #         min_top_rank = None
+    #     )
+    #     race_year = result_features_df.filter(
+    #         pl.col("race_id") == race_id
+    #     ).select("year").to_numpy()[0][0]
+    #     race_Y = np.ones(len(rider_pairs))  #dummy Y
+    #     rider_features = self.get_rider_pair_features(
+    #         rider_pairs = rider_pairs,
+    #         result_features_df = None,
+    #         riders_yearly_data=riders_yearly_data,
+    #         race_year = race_year,
+    #         race_Y = race_Y
+    #     )
+    #     dtest = xgb.DMatrix(rider_features, label=race_Y)
+    #     y_pred_proba = self.bst.predict(dtest)
+    #     # pair_outcomes = self.bst.predict(rider_features)  #probability that rider 0 wins
+    #     riders = set(
+    #         [rider for pair in rider_pairs for rider in pair]
+    #     )
+    #     rider_scores = {
+    #         rider: [] for rider in riders
+    #     }
+    #     for (first, second), pred_y in zip(rider_pairs, y_pred_proba):
+    #         rider_scores[first].append(pred_y)
+    #         rider_scores[second].append( - pred_y)
+    #     rider_scores = {
+    #         rider: np.sum(scores) for rider, scores in rider_scores.items()
+    #     }
+    #     top10 = sorted(rider_scores.items(), key=lambda x: x[1], reverse=True)[:10]
 
-        # Print nicely
-        for name, score in top10:
-            print(f"{name}: {score:.4f}")
+    #     # Print nicely
+    #     for name, score in top10:
+    #         print(f"{name}: {score:.4f}")
 
-        pass
+    #     pass
 
 def train():
-    riders_data = pl.read_parquet("data_v2/rider_stats_df.parquet")
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
@@ -533,30 +535,380 @@ def train():
     )
     model = RaceModel()
     model.train_model(
-        riders_data=riders_data, 
         result_features_df=results_features, 
         riders_yearly_data=riders_yearly_data, 
         races_features_df=races_features)
     model.save_model()
 
+# from race_prediction_functions import predict_race
 
-def predict():
-    riders_data = pl.read_parquet("data_v2/rider_stats_df.parquet")
-    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
+from data_science_functions import RACE_SIMILARITY_COLS, scores_to_probability_results
+
+def get_new_race_embedding(
+    race_to_find_for: pl.DataFrame, 
+    old_embeddings: pl.DataFrame, 
+    old_races: pl.DataFrame
+) -> pl.DataFrame:
+    """
+    closest 5 races in the same (stage-)race over last 5 years
+
+    This function is total overkill since it can act on find for multiple races at once. 
+    """
+    duplicate_races = race_to_find_for.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+        old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
+        on = ["name"]
+    ).filter(
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
+    ).filter(
+        pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
+    ).filter(
+        ~ (pl.col("race_id") == pl.col("race_id_right"))
+    )
+    #TODO years should be replaced by dates, so only earlier stages are taken
+    # not critical tho
+    duplicate_races_normalized = duplicate_races.with_columns(
+        *[
+            (
+                (pl.col(c) - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised")
+            for c in RACE_SIMILARITY_COLS
+        ],
+        *[
+            (
+                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised_right")
+            for c in RACE_SIMILARITY_COLS
+        ]
+    )
+    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
+        (
+            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
+        ).alias(f"{c}_distance")
+        for c in RACE_SIMILARITY_COLS
+    ])
+    duplicate_races_distance = duplicate_races_distance_part.with_columns(
+        (pl.sum_horizontal([
+            pl.col(f"{c}_distance") 
+            for c in RACE_SIMILARITY_COLS
+        ])
+        ).sqrt().alias("total_distance")
+    )
+    closest_race_ids = duplicate_races_distance.sort(
+        "total_distance", descending=False
+    ).group_by("race_id").head(5).select("race_id", "race_id_right")
+    closest_embedding = closest_race_ids.join(
+        old_embeddings.rename({"race_id": "race_id_right"}),
+        on="race_id_right",
+        how="left"
+    ).group_by(
+        "race_id",
+    ).agg(
+        *[
+            pl.col(c).mean()
+            for c in old_embeddings.columns if c != "race_id"
+        ]
+    )
+    return closest_embedding
+
+def get_rider_features(
+        new_race: pl.DataFrame,
+        startlist: pl.DataFrame, 
+        results: pl.DataFrame, 
+        races: pl.DataFrame
+    ) -> pl.DataFrame:
+
+    results_with_dates = results.join(
+        races.select(["race_id", pl.col("date").str.to_date()]),
+        on = "race_id",
+        how="left"
+    )
+    startlist_results = startlist.rename({"rider": "name"}).join(
+        results_with_dates,
+        on = "name"
+    )
+
+    windows = {
+        "1110d": 1110,
+        "370d": 370,
+        "40d": 40,
+    }
+    startlist_results = startlist_results.join(
+        new_race.select(pl.col("date").str.to_date().alias("new_race_date")),
+        how="cross"
+    )
+
+    dfs = []
+    for label, offset in windows.items():
+        dfs.append(
+            startlist_results.filter(
+                pl.col("date") >= (pl.col("new_race_date") - pl.duration(days = (offset - 1)))
+            ).group_by(
+                "name"
+            ).agg(
+                pl.count("race_id").alias(f"nr_races_participated_{label}"),
+                (pl.when(pl.col("rank") < 25).then(1)
+                    .otherwise(None)
+                ).sum().alias(f"nr_top25_{label}"),
+                (pl.when(pl.col("rank") < 10).then(1)
+                    .otherwise(None)
+                ).sum().alias(f"nr_top10_{label}"),
+                (pl.when(pl.col("rank") < 3).then(1)
+                    .otherwise(None)
+                ).sum().alias(f"nr_top3_{label}"),
+            )
+        )
+    rider_features = startlist.join(
+        new_race.select("race_id"),
+        how="cross"
+    ).rename({"rider": "name"})
+    for df in dfs:
+        if len(df) == 0:
+            rider_features = rider_features.with_columns(
+                [pl.lit(0).alias(c)
+                 for c in df.columns if c != "name"]
+            )
+            continue
+        rider_features = rider_features.join(
+            df,
+            on="name",
+            how="left"
+        ).fill_null(0)
+    return rider_features
+
+
+def get_rider_embeddings(startlist: pl.DataFrame, results_embedded_df: pl.DataFrame) -> pl.DataFrame:
+    most_recent_embedding_date = results_embedded_df.sort("date").with_columns(
+        pl.col("date").last().over("name").alias("most_recent_date")
+    )
+    most_recent_embedding = most_recent_embedding_date.filter(pl.col("date") == pl.col("most_recent_date"))
+    
+    return startlist.rename({"rider": "name"}).select("name").join(
+        most_recent_embedding,
+        on="name",
+        how="left"
+    ).drop("date", "most_recent_date", "cosine_similarity", "race_id")
+
+def get_rider_pairs(race_id: int, result_features_df: pl.DataFrame, min_top_rank: int = None) -> list[list[str, str]]:
+    """
+    returns pairs of rider names
+    """
+    max_weight = 10
+    nr_riders = result_features_df.filter(pl.col("race_id") == race_id).height
+
+    if min_top_rank is None:
+        min_top_rank = nr_riders
+
+    top_riders = result_features_df.filter(
+        pl.col("race_id") == race_id
+    )
+    all_riders = result_features_df.filter(
+        pl.col("race_id") == race_id
+    )         
+    pairs = []
+    for i, top_rider in enumerate(top_riders["name"]):
+        for j, other_rider in enumerate(all_riders["name"]):
+            if i < j:
+                if (top_rider, other_rider) not in pairs:
+                    pairs.append((top_rider, other_rider))
+    return pairs
+
+    pairs = (
+        rider_features_df
+        .join(rider_features_df, how="cross")
+        .filter(pl.col("name") < pl.col("name_right"))
+        .select(
+            pl.struct(pl.col("name"), pl.col("name_right")).alias("pair")
+        )
+    )
+    pairs_list = (
+        pairs
+        .select(pl.col("pair").map_elements(lambda x: (x["name"], x["name_right"])))
+        .to_series()
+        .to_list()
+    )
+    return pairs_list
+
+from data_science_functions import calculate_cosine_similarity_polars
+def add_embedding_similarity_for_new_race(
+    rider_embeddings: pl.DataFrame, 
+    race_embedding: pl.DataFrame
+) -> pl.DataFrame:
+
+    results_w_race_embeddings = rider_embeddings.join(
+        race_embedding,
+        how= "cross",
+    )
+    embedding_similary = calculate_cosine_similarity_polars(results_w_race_embeddings)
+
+    return rider_embeddings.join(
+        embedding_similary.select(["name", "cosine_similarity"]),
+        on = ["name"],
+        how="left"
+    )
+
+def new_race_to_xgboost_format(
+        rider_features_df: pl.DataFrame, 
+        riders_yearly_data: pl.DataFrame,
+        new_race_features: pl.DataFrame,
+    ) -> tuple[np.ndarray, np.ndarray, list[list[str, str]]]:
+        mock_model = RaceModel()
+
+        race_id: int = new_race_features.select(
+            ["race_id"] 
+        ).unique().to_series().to_list()[0] #Take race_ids from results since only care about races with results
+    
+        rider_pairs = get_rider_pairs(
+            result_features_df = rider_features_df,
+            race_id = new_race_features.select("race_id").to_numpy()[0][0]
+        )
+
+        race_Y = np.random.choice([-1, 1], size=(len(rider_pairs),))
+
+        rider_pair_features = mock_model.get_rider_pair_features(
+            rider_pairs=rider_pairs,
+            result_features_df = rider_features_df,
+            riders_yearly_data = riders_yearly_data,
+            race_year=2026,
+            race_id = race_id,
+            race_Y=race_Y
+        )
+
+        race_features = new_race_features.filter(
+            pl.col("race_id") == race_id
+        ).select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
+        race_features = np.tile(race_features, (len(rider_pairs), 1))
+
+        race_X = np.hstack([rider_pair_features, race_features])
+        # X.append(race_X)
+        # y.append(race_Y)
+
+        # y = np.concatenate(y)
+        # X = np.vstack(X)
+        # X_weights = np.array(X_weights)
+        # print(f"training on {len(y)} pairs")
+
+        return race_X, race_Y, rider_pairs
+
+def predict_race(startlist_df, race_stats_df):
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    results_df = pl.read_parquet("data_v2/results_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-    races_features_df = pl.read_parquet("data_v2/races_features_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    """Prepare data of race and riders to give to xgboost"""
+
+    # new_race_normalized = normalize_new_race_data(
+    #     new_race = race_stats_df,
+    #     old_races = races_df #use non normalized to normalize
+    # )
+
+    # race_feats = get_new_race_features(
+    #     old_races_features = races_features_df,
+    #     race_to_find_for=race_stats_df
+    # )
+    race_embedding = get_new_race_embedding(
+        race_to_find_for = race_stats_df,
+        old_embeddings = races_embedded_df,
+        old_races = races_df,
+    )
+    race_feats = race_embedding.join(
+        race_stats_df,
+        on = ["race_id"],
+        how="left"
+    )
+    rider_feats = get_rider_features(
+        new_race=race_stats_df,
+        startlist=startlist_df,
+        results = results_df,
+        races=races_df
+    )
+    rider_embeddings = get_rider_embeddings(
+        startlist = startlist_df,
+        results_embedded_df = results_embedded_df
+    )
+    rider_embeddings = add_embedding_similarity_for_new_race(
+        rider_embeddings=rider_embeddings,
+        race_embedding=race_embedding,
+    )
+    rider_feats = rider_feats.join(
+        rider_embeddings,
+        on="name"
+    )
+
+    """Use prepared data to generate inter-rider results"""
+
+    model = RaceModel()
+    model.load_model()
+
+    X, Y, pairs = new_race_to_xgboost_format(
+        rider_features_df=rider_feats, 
+        riders_yearly_data=riders_yearly_data, 
+        new_race_features = race_feats 
+    )
+    riders = set(
+        [rider for pair in pairs for rider in pair]
+    )
+    rider_scores = {
+        rider: [] for rider in riders
+    }
+
+    dtest = xgb.DMatrix(X, label=Y)
+    y_pred_proba = model.bst.predict(dtest)
+    for (first, second), pred_y, x, y in zip(pairs, y_pred_proba, X, Y):
+        # if first == "tadej-pogacar" or first == "remco_evenepoel" or second == "tadej-pogacar" or second == "remco_evenepoel":
+        #     breakpoint()
+        if y == 1:
+            
+            rider_scores[first].append(pred_y)
+            rider_scores[second].append( - pred_y)
+        else:
+            rider_scores[first].append( - pred_y)
+            rider_scores[second].append(pred_y)
+    rider_scores = {
+        rider: np.sum(scores) for rider, scores in rider_scores.items()
+    }
+    rider_scores_df = pl.DataFrame(
+        list(rider_scores.items()), schema=["name", "score"]
+    )    
+    rider_percentages_df = scores_to_probability_results(rider_scores_df)
+
+    top10 = sorted(rider_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+        # Print nicely
+    for name, score in top10:
+        print(f"{name}: {score:.4f}")
+    return
+
+def evaluate():
+    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+
+    results_features = results_embedded_df.join(
+        result_features_df,
+        on = ["race_id", "name"],
+        how="left"
+    )
+    races_features = races_embedded_df.join(
+        races_df,
+        on = ["race_id"],
+        how="left"
+    )
     model = RaceModel()
     model.load_model()
 
     """Evaluate model"""
-    X, y, x_weights = model.to_xgboost_format(
-        result_features_df=result_features_df, 
-        riders_yearly_data=riders_yearly_data, 
-        races_features_df = races_features_df 
-    )
-    X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
+    # X, y, x_weights = model.to_xgboost_format(
+    #     result_features_df=results_features, 
+    #     riders_yearly_data=riders_yearly_data, 
+    #     races_features_df = races_features 
+    # )
+    # X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
 
-    model.evaluate_model(X_test, y_test, test_weights=test_weights)
+    # model.evaluate_model(X_test, y_test, test_weights=test_weights)
 
     print("Model evaluated")
 
@@ -566,23 +918,27 @@ def predict():
     # print(races.filter(pl.col("date") == "2024-07-20").head(5))
     rvv_id = "R487e2808"
     tdf_2024_20_id = "R5e8c7e1a"
-    model.predict_race(
-        riders_data=riders_data,
-        result_features_df=result_features_df,
-        riders_yearly_data=riders_yearly_data,
-        race_id=rvv_id
+    some_other = "R859481ad"
+    
+    # predict_race(
+    #     startlist_df=results_features.filter(
+    #         pl.col("race_id") == rvv_id
+    #     ).select(pl.col("name").alias("rider"), "team"),
+    #     race_stats_df=races_df.filter(pl.col("race_id") == rvv_id)
+    # )
+    predict_race(
+        startlist_df=results_features.filter(
+            pl.col("race_id") == some_other
+        ).select(pl.col("name").alias("rider"), "team"),
+        race_stats_df=races_df.filter(pl.col("race_id") == some_other)
     )
-
-    model.predict_race(
-        riders_data=riders_data,
-        result_features_df=result_features_df,
-        riders_yearly_data=riders_yearly_data,
-        race_id=tdf_2024_20_id
-    )
+    actual_result = results_features.filter(pl.col("race_id") == some_other).sort("rank")\
+        .select("name", "rank").head(10)
+    print(actual_result)
 
 def main():
     # train()
-    predict()
+    evaluate()
 
 if __name__ == "__main__":
     main()

@@ -127,12 +127,22 @@ def download_rider_pages() -> list[dict]:
     
     returns logs
     """
-    results = pl.read_parquet("data_v2/results_df.parquet")
-    rider_names = results.select("name").unique()["name"].to_list()
-
+    downloaded_riders = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    
+    results_not_downloaded = (pl.read_parquet("data_v2/results_df.parquet")
+        .group_by("name")
+        .agg(pl.count())
+        .filter(pl.col("count") >= 5)).select("name").unique().join(
+            downloaded_riders.select("name").unique(),
+            on="name",
+            how="anti"
+        )
+    rider_names = results_not_downloaded["name"].to_list()
+    print(f"Downloading pages for {len(rider_names)} riders")
     log_messages = []
 
     for rider in rider_names:
+        # print(f"Downloading rider: {rider}")
         rider_url = f"{BASE_URL}/rider/{rider}"
         try:
             _, logs = download_page(rider_url)
@@ -150,7 +160,45 @@ def download_rider_pages() -> list[dict]:
 
     return log_messages
 
-def download_year_races(year: int) -> list[dict]:
+def get_already_downloaded_races(downloaded_races: pl.DataFrame) -> list[tuple[str, str]]:
+    
+        # f"{BASE_URL}/race/{race}/2026/startlist"
+    keys_df = (
+        downloaded_races
+        .select(
+            [pl.concat_str([
+                pl.lit(f"{BASE_URL}/race/"),
+                pl.col("name").cast(pl.Utf8),
+                pl.lit("/"),
+                pl.col("year").cast(pl.Utf8),
+                pl.lit("/startlist"),
+            ]).alias("key_startlist"),
+            pl.concat_str([
+                pl.lit(f"{BASE_URL}/race/"),
+                pl.col("name").cast(pl.Utf8),
+                pl.lit("/"),
+                pl.col("year").cast(pl.Utf8),
+                pl.lit("/result")
+            ]).alias("key_result"),
+            pl.concat_str([
+                pl.lit(f"{BASE_URL}/race/"),
+                pl.col("name").cast(pl.Utf8),
+                pl.lit("/"),
+                pl.col("year").cast(pl.Utf8),
+                pl.lit("/stage-"),
+                pl.col("stage").cast(pl.Utf8),
+            ]).alias("key_stage"),
+            
+            ]
+        )
+    )
+    valid_keys_startlist = set(keys_df["key_startlist"].to_list())
+    valid_keys_result = set(keys_df["key_result"].to_list())
+    valid_keys_stage = set(keys_df["key_stage"].to_list())
+    return valid_keys_startlist, valid_keys_result, valid_keys_stage
+
+
+def download_year_races(year: int, downloaded_races: pl.DataFrame) -> list[dict]:
     """Downloads all races for a given year + profiles
     
     returns logs
@@ -158,10 +206,15 @@ def download_year_races(year: int) -> list[dict]:
     year_races_file = f"urls/races_{year}.txt"
     with open(year_races_file, "r") as f:
         race_urls = f.read().splitlines()
+
+    valid_keys_startlist, valid_keys_result, valid_keys_stage = get_already_downloaded_races(downloaded_races)
+    keys = set([*valid_keys_startlist, *valid_keys_result, *valid_keys_stage])
+    race_urls_filtered = [s for s in race_urls if s not in keys]
+    print(f"downloading {len(race_urls_filtered)} for races in year {year}, coming from {len(race_urls)}")
     
     log_messages = []
-    for race_url in race_urls:
-        print(race_url)
+    for race_url in race_urls_filtered:
+        # print(race_url)
         tail = race_url.split("/")[-1]
         if "result" not in tail and "stage" not in tail and "prologue" not in tail:
             continue
@@ -192,7 +245,11 @@ def parse_riders_to_polars() -> tuple[pl.DataFrame, pl.DataFrame]:
     for rider in rider_names:
         print(f"parsing rider: {rider}")
         rider_url = f"{BASE_URL}/rider/{rider}"
-        rider_soup = load_soup_from_file(rider_url)
+        try:
+            rider_soup = load_soup_from_file(rider_url)
+        except Exception as e:
+            log_messages.append(f"exception for loading rider file {rider_url}: {e}")
+            continue
         try:
             rider_stats = parse_rider_page(rider_soup)
             rider_stats["name"] = rider
@@ -202,7 +259,11 @@ def parse_riders_to_polars() -> tuple[pl.DataFrame, pl.DataFrame]:
             continue
 
         rider_statistics_url = f"{rider_url}/statistics/season-statistics"
-        rider_statistics_soup = load_soup_from_file(rider_statistics_url)
+        try:
+            rider_statistics_soup = load_soup_from_file(rider_statistics_url)
+        except Exception as e:
+            log_messages.append(f"exception for loading rider statistics file {rider_statistics_url}: {e}")
+            continue
         try:
             rider_yearly_stats = parse_rider_statistics_page(rider_statistics_soup)
         except Exception as e:
@@ -234,13 +295,17 @@ def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -
     all_race_stats = []
     all_results = []
     for race_url in race_urls:
-        race_name, year, tail = race_url.split("/")[-3:]
+        try:
+            race_name, year, tail = race_url.split("/")[-3:]
+        except Exception as e:
+            logs.append(f"exception for splitting race url {race_url}: {e}")
+            continue
         if (race_name, year) in already_in_polars:
             print(f"Skipping already parsed race {race_url}")
             continue
         if "result" not in tail and "stage" not in tail and "prologue" not in tail:
             continue
-        print(f"parsing {race_url}")
+        # print(f"parsing {race_url}")
         try: 
             race_soup = load_soup_from_file(race_url)
         except Exception as e:
@@ -259,6 +324,11 @@ def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -
             "result": 1,
             "prologue": 0,
         }
+        if tail not in mapping:
+            try: 
+                int(tail.split("-")[1])
+            except Exception as e:
+                continue 
         stage_nr = mapping[tail] if tail in mapping else int(tail.split("-")[1])
         race_profile, parse_logs = parse_race_profile_page(
             race_profile_soup,
@@ -292,6 +362,7 @@ def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -
             all_results=all_results
         )
     except Exception as e:
+        races_df, results_df = None, None
         logs.append(f"exception for filtering stats: {e}")
     
 
@@ -355,8 +426,8 @@ def parse_new_races_to_dict(races: list[tuple[str, int]]) -> tuple[dict, list[st
 
 
 def make_races_results_df():
-    current_races_df = pl.read_parquet("data/races_df.parquet")
-    current_results_df = pl.read_parquet("data/results_df.parquet")
+    current_races_df = pl.read_parquet("data_v2/races_df.parquet")
+    current_results_df = pl.read_parquet("data_v2/results_df.parquet")
     races_in_polars = [
         (race["name"], race["year"]) 
         for race in current_races_df.select(["name", "year"]).unique().to_dicts()
@@ -369,22 +440,25 @@ def make_races_results_df():
             already_in_polars = races_in_polars
         )
         logs.extend(parse_logs)
-        current_races_df = pl.concat([races_df]).unique(subset=["name", "race_id"])
-        current_results_df = pl.concat([results_df]).unique(subset=["name", "race_id"])
+        
+        if races_df is not None and results_df is not None:
+            current_races_df = pl.concat([current_races_df, races_df]).unique(subset=["name", "race_id"])
+            current_results_df = pl.concat([current_results_df, results_df]).unique(subset=["name", "race_id"])
+
     current_races_df.write_parquet("data_v2/races_df.parquet")
     current_results_df.write_parquet("data_v2/results_df.parquet")
 
     return logs
 
 def make_riders_stats_df():
-    current_rider_stats_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    # current_rider_stats_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
     current_rider_yearly_stats_df = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     logs = []
     all_rider_stats_df, all_rider_yearly_stats_df, parse_logs = parse_riders_to_polars()
     logs.extend(parse_logs)
-    current_rider_stats_df = pl.concat([current_rider_stats_df, all_rider_stats_df]).unique(subset=["name"])
+    # current_rider_stats_df = pl.concat([current_rider_stats_df, all_rider_stats_df]).unique(subset=["name"])
     current_rider_yearly_stats_df = pl.concat([current_rider_yearly_stats_df, all_rider_yearly_stats_df]).unique(subset=["name", "season"])
-    current_rider_stats_df.write_parquet("data_v2/rider_stats_df.parquet")
+    # current_rider_stats_df.write_parquet("data_v2/rider_stats_df.parquet")
     current_rider_yearly_stats_df.write_parquet("data_v2/rider_yearly_stats_df.parquet")
 
     return logs
@@ -452,24 +526,24 @@ def main():
 
     # for i in range(2013, 2026):
     #     fetch_year_race_urls(i)
-
-    # for i in range(2021, 2026):
-    #     more_logs = download_year_races(i)
+    downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
+    # for i in range(2013, 2026):
+    #     more_logs = download_year_races(i, downloaded_races)
     #     logs += more_logs
 
-    more_logs = make_races_results_df()
-    logs += more_logs
+    # more_logs = make_races_results_df()
+    # logs += more_logs
     
-    # more_logs = download_rider_pages()
-    # logs += more_logs
-    # more_logs = make_riders_stats_df()
-    # logs += more_logs
+    more_logs = download_rider_pages()
+    logs += more_logs
+    more_logs = make_riders_stats_df()
+    logs += more_logs
 
     # logs = main_new()
 
     with open(f"logs.txt", "w") as f:
         f.write("\n".join(logs))
-    print(logs)
+    # print(logs)
 
 
     
