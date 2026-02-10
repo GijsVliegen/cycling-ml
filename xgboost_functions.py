@@ -1,3 +1,4 @@
+import bisect
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
@@ -50,7 +51,7 @@ class RaceModel:
 
         self.embed_features = [
             f"embed_{i}"
-            for i in range(1, 11)
+            for i in range(1, 21)
         ]
         self.rider_result_features = [
             # 'specialty', #needs to be encoded
@@ -71,7 +72,8 @@ class RaceModel:
             'nr_top10_40d',
             'nr_top3_40d',
             "strength_40d",
-            "cosine_similarity"
+            "cosine_similarity",
+            "relative_team_strength_rank"
         ] + self.embed_features
         self.rider_yearly_features = [
             "points",
@@ -86,6 +88,7 @@ class RaceModel:
             "elevation_m",
             "profile_score",
             "profile_score_last_25k",
+            "final_km_percentage",
             # "classification", #needs to be encoded
             "year",
             "startlist_score", #Check present in pairs
@@ -126,15 +129,18 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=1000,
+            num_boost_round=200,
             evals=[],
             params = {
                 "objective": "reg:squarederror",
                 "eval_metric": "rmse",
+                # "objective": "binary:logistic",
+                # "eval_metric": "logloss",
                 "min_child_weight": 10,
                 "max_depth": 4,
                 "tree_method": "hist",
-                "max_bin": 128,
+                # "max_bin": 3,
+                "early_stopping_rounds": 50,
                 # "subsample": 0.05,
             },
             callbacks=[PrintIterationCallback()],
@@ -183,22 +189,32 @@ class RaceModel:
             if race_year < 2016: #DO not take early data, since relies on data for 3 years back
                 continue
 
-            rider_pairs, pair_weights = self.get_rider_pairs_weights(
+            rider_pairs, values_to_predict = self.get_rider_pairs_values(
                 race_id=race_id,
                 result_features_df=result_features_df
             )
             rider_pairs = rider_pairs#[:min(nr_pairs_per_race, len(rider_pairs))]
+            if len(rider_pairs) == 0:
+                print(f"skipping because no pairs")
+                continue
+            ordering = np.array([1] * len(rider_pairs))
+            #np.random.choice([-1, 1], size=(len(rider_pairs),))
+            values_to_predict = np.array(values_to_predict) * ordering
 
-            race_Y = np.random.choice([-1, 1], size=(len(rider_pairs),))
-
-            rider_pair_features = self.get_rider_pair_features(
-                rider_pairs = rider_pairs,
-                result_features_df = result_features_df,
-                riders_yearly_data = riders_yearly_data,
-                race_year = race_year,
-                race_id = race_id,
-                race_Y=race_Y
-            )
+            try:
+                rider_pair_features = self.get_rider_pair_features(
+                    rider_pairs = rider_pairs,
+                    result_features_df = result_features_df,
+                    riders_yearly_data = riders_yearly_data,
+                    race_year = race_year,
+                    race_id = race_id,
+                    ordering=ordering
+                )
+            except ValueError as e:
+                print(f"skipping race {races_features_df.filter(
+                        pl.col("race_id") == race_id
+                    ).select("name", "year").to_numpy()[0]}")
+                continue
 
             race_features = races_features_df.filter(
                 pl.col("race_id") == race_id
@@ -207,12 +223,12 @@ class RaceModel:
 
             race_X = np.hstack([rider_pair_features, race_features])
             X.append(race_X)
-            X_weights.extend(pair_weights)
-            y.append(race_Y)
+            # X_weights.extend(pair_weights)
+            y.append(values_to_predict)
 
         y = np.concatenate(y)
         X = np.vstack(X)
-        X_weights = np.array(X_weights)
+        X_weights = np.array([1] * len(y))
         print(f"training on {len(y)} pairs")
 
         return X, y, X_weights
@@ -224,7 +240,7 @@ class RaceModel:
         riders_yearly_data: pl.DataFrame,
         race_year: int,
         race_id: str,
-        race_Y: np.ndarray
+        ordering: np.ndarray
     ) -> np.ndarray:    
         """
         rider_pairs, list of tuples of rider names, for a whole race (thousands of pairs)
@@ -241,7 +257,7 @@ class RaceModel:
         )
         def get_riders_result_data(rider_filters: pl.DataFrame) -> tuple[np.array, np.array]:
             rider_0_data = race_results.filter().join(
-                rider_filters.unique(subset=["name_0","name_1"]).select("name_0"),
+                rider_filters.unique(subset=["name_0","name_1"], maintain_order=True).select("name_0"),
                 left_on=["name"],
                 right_on=["name_0"],
                 how="right"
@@ -251,7 +267,7 @@ class RaceModel:
             rider_0_data: np.array = rider_0_data.to_numpy().astype(np.float32).astype(np.float32, copy=False)
             rider_0_data[np.isnan(rider_0_data)] = 0.0
             rider_1_data: pl.DataFrame = race_results.join(
-                rider_filters.unique(subset=["name_0","name_1"]).select("name_1"),
+                rider_filters.unique(subset=["name_0","name_1"], maintain_order=True).select("name_1"),
                 left_on=["name"],
                 right_on=["name_1"],
                 how="right"
@@ -289,12 +305,12 @@ class RaceModel:
                 "name_0": rider_pair_names[0],
                 "name_1": rider_pair_names[1],
                 "year": year
-            } if y == 1 else {
+            } if order == 1 else {
                 "name_0": rider_pair_names[1],
                 "name_1": rider_pair_names[0],
                 "year": year
             }
-            for rider_pair_names, y in zip(rider_pairs, race_Y)
+            for rider_pair_names, order in zip(rider_pairs, ordering)
             for year in years_to_go_back
         )
         rider_0_data, rider_1_data = get_riders_result_data(rider_filters)
@@ -305,11 +321,12 @@ class RaceModel:
         feature_cols = np.hstack([rider_0_data, rider_1_data])
         if feature_cols.shape[0] != yearly_feature_cols.shape[0]:
             raise ValueError("Feature columns shape does not match number of rider pairs")
+            
         all_feat_cols = np.hstack([feature_cols, yearly_feature_cols])
         
         return all_feat_cols
 
-    def get_rider_pairs_weights(self, race_id: int, result_features_df: pl.DataFrame, min_top_rank: int = 25) -> list[tuple[str, str, float]]:
+    def get_rider_pairs_values(self, race_id: int, result_features_df: pl.DataFrame, min_top_rank: int = 25) -> list[tuple[str, str, float]]:
         """
         returns pairs of rider names and weight of importance, rider 0 is the favorite
 
@@ -320,7 +337,6 @@ class RaceModel:
             - weights: If a pair has weight w, then in the loss it behaves like it appears w times.
                 - weight = abs distance between ranks
         """
-        max_weight = 10
         nr_riders = result_features_df.filter(pl.col("race_id") == race_id).height
 
         if min_top_rank is None:
@@ -328,24 +344,36 @@ class RaceModel:
 
         top_riders = result_features_df.filter(
             pl.col("race_id") == race_id
-        ).sort("rank").head(25)
+        ).sort("rank").head(15)
         all_riders = result_features_df.filter(
             pl.col("race_id") == race_id
-        )         
+        ).sort("rank")        
         pairs = []
-        weights = []
+        values_to_predict = []
+        buckets = [3, 10, 25, 9999]
         for i, top_rider in enumerate(top_riders["name"]):
             for j, other_rider in enumerate(all_riders["name"]):
                 if i < j:
                     if (top_rider, other_rider) not in pairs:
                         pairs.append((top_rider, other_rider))
-                        """Weights explained:
-                        - abs(i,j) -> larger distance should be easier to guess so more weight to these
-                        - nr_riders - i -> predicting first place more important"""
+                        pairs.append((other_rider, top_rider))
+                        top_bucket = bisect.bisect_left(buckets, i+1) 
+                        bot_bucket = bisect.bisect_left(buckets, j+1) + 1
+                        # if top_bucket == bot_bucket:
+                        #     values_to_predict.append(1)# if i < j else -1 * diff)
+                        # else:
+                        #     values_to_predict.append(0)
+                        values_to_predict.append(1)
+                        values_to_predict.append(-1)
+                        # diff = bot_bucket - top_bucket
+                        # """Weights explained:
+                        # - abs(i,j) -> larger distance should be easier to guess so more weight to these
+                        # - nr_riders - i -> predicting first place more important"""
                     # if i == 10 and j :
                         # print(1 + (nr_riders - i)*(nr_riders - abs(i-j)))
-                        weights.append(1 + (nr_riders - i)*(nr_riders - abs(i-j))) 
-        return pairs, weights
+                        # weights.append(1 + (nr_riders - i)*(nr_riders - abs(i-j))) 
+                        
+        return pairs, values_to_predict
 
     def get_rider_pair_win_diff(self, rider_0: str, rider_1: str, race_data: pl.DataFrame) -> int:
         #filter race_data on rider names
@@ -399,7 +427,7 @@ class RaceModel:
         last 20% of years as test set
         this is done by sorting the columns and splitting
         """
-        years = X[:, -8]
+        years = X[:, -12]
         unique_years = np.unique(years)
         split_year = unique_years[int(len(unique_years) * 0.8)]
 
@@ -429,8 +457,8 @@ class RaceModel:
         y_pred explained:
         - by default, threshold is 0
         """
-        y_pred = (y_pred_proba > 0).astype(int) 
-        y_test_class = ((y_test + 1) / 2).astype(int)  #convert -1,1 to 0,1
+        y_pred = (y_pred_proba >= 0).astype(int) 
+        y_test_class = (y_test >= 0).astype(int)  #convert -1,1 to 0,1
         # Compute metrics
         accuracy = accuracy_score(y_test_class, y_pred)
         precision = precision_score(y_test_class, y_pred, zero_division=0)
@@ -620,9 +648,16 @@ def get_rider_features(
     ) -> pl.DataFrame:
 
     results_with_dates = results.join(
-        races.select(["race_id", pl.col("date").str.to_date()]),
+        races.select(["race_id", pl.col("date").str.to_date(), "startlist_score"]),
         on = "race_id",
         how="left"
+    )
+    results_with_dates = results_with_dates.with_columns(
+        (pl.when(pl.col("rank") <= 3).then(8.333).
+        otherwise(pl.when(
+            pl.col("rank") <= 10).then(2.5)
+            .otherwise(pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+        )) * pl.col("startlist_score")).alias("points"),
     )
     startlist_results = startlist.rename({"rider": "name"}).join(
         results_with_dates,
@@ -657,6 +692,7 @@ def get_rider_features(
                 (pl.when(pl.col("rank") < 3).then(1)
                     .otherwise(None)
                 ).sum().alias(f"nr_top3_{label}"),
+                pl.col("points").sum().alias(f"strength_{label}"),
             )
         )
     rider_features = startlist.join(
@@ -675,6 +711,11 @@ def get_rider_features(
             on="name",
             how="left"
         ).fill_null(0)
+    
+    rider_features = rider_features.with_columns(
+        pl.col("strength_370d").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
+    )
+
     return rider_features
 
 
@@ -712,23 +753,9 @@ def get_rider_pairs(race_id: int, result_features_df: pl.DataFrame, min_top_rank
             if i < j:
                 if (top_rider, other_rider) not in pairs:
                     pairs.append((top_rider, other_rider))
+                    pairs.append((other_rider, top_rider))
     return pairs
 
-    pairs = (
-        rider_features_df
-        .join(rider_features_df, how="cross")
-        .filter(pl.col("name") < pl.col("name_right"))
-        .select(
-            pl.struct(pl.col("name"), pl.col("name_right")).alias("pair")
-        )
-    )
-    pairs_list = (
-        pairs
-        .select(pl.col("pair").map_elements(lambda x: (x["name"], x["name_right"])))
-        .to_series()
-        .to_list()
-    )
-    return pairs_list
 
 from data_science_functions import calculate_cosine_similarity_polars
 def add_embedding_similarity_for_new_race(
@@ -764,7 +791,8 @@ def new_race_to_xgboost_format(
             race_id = new_race_features.select("race_id").to_numpy()[0][0]
         )
 
-        race_Y = np.random.choice([-1, 1], size=(len(rider_pairs),))
+        ordering = np.array([1] * len(rider_pairs))
+        # np.random.choice([-1, 1], size=(len(rider_pairs),))
 
         rider_pair_features = mock_model.get_rider_pair_features(
             rider_pairs=rider_pairs,
@@ -772,7 +800,7 @@ def new_race_to_xgboost_format(
             riders_yearly_data = riders_yearly_data,
             race_year=2026,
             race_id = race_id,
-            race_Y=race_Y
+            ordering=ordering
         )
 
         race_features = new_race_features.filter(
@@ -781,6 +809,21 @@ def new_race_to_xgboost_format(
         race_features = np.tile(race_features, (len(rider_pairs), 1))
 
         race_X = np.hstack([rider_pair_features, race_features])
+
+        # for i, (a, b) in enumerate(rider_pairs):
+        #     if a == "tadej-pogacar" or a == "mathieu-van-der-poel" or b == "tadej-pogacar" or b == "mathieu-van-der-poel":
+        #         print(a)
+        #         print(b)
+        #         print(f"y = {race_Y[i]}")
+        #         print([round(x, 2) for x in race_X[i][0:15]])
+        #         print([round(x, 2) for x in race_X[i][15:26]])
+        #         print([round(x, 2) for x in race_X[i][26:41]])
+        #         print([round(x, 2) for x in race_X[i][41:52]])
+        #         # print(rider_pair_features[i])
+        #         print(rider_features_df.filter(pl.col("name") == "mathieu-van-der-poel").select(
+        #             [a for a in rider_features_df.columns if not "embed" in a and a not in ["name", "race_id", "team", "cosine_similarity"]]
+        #         ))
+                # breakpoint()
         # X.append(race_X)
         # y.append(race_Y)
 
@@ -789,7 +832,7 @@ def new_race_to_xgboost_format(
         # X_weights = np.array(X_weights)
         # print(f"training on {len(y)} pairs")
 
-        return race_X, race_Y, rider_pairs
+        return race_X, ordering, rider_pairs
 
 def predict_race(startlist_df, race_stats_df):
     races_df = pl.read_parquet("data_v2/races_df.parquet")
@@ -842,7 +885,7 @@ def predict_race(startlist_df, race_stats_df):
     model = RaceModel()
     model.load_model()
 
-    X, Y, pairs = new_race_to_xgboost_format(
+    X, ordering, pairs = new_race_to_xgboost_format(
         rider_features_df=rider_feats, 
         riders_yearly_data=riders_yearly_data, 
         new_race_features = race_feats 
@@ -854,12 +897,12 @@ def predict_race(startlist_df, race_stats_df):
         rider: [] for rider in riders
     }
 
-    dtest = xgb.DMatrix(X, label=Y)
+    dtest = xgb.DMatrix(X)#, label=Y)
     y_pred_proba = model.bst.predict(dtest)
-    for (first, second), pred_y, x, y in zip(pairs, y_pred_proba, X, Y):
+    for (first, second), pred_y, x, order in zip(pairs, y_pred_proba, X, ordering):
         # if first == "tadej-pogacar" or first == "remco_evenepoel" or second == "tadej-pogacar" or second == "remco_evenepoel":
         #     breakpoint()
-        if y == 1:
+        if order == 1:
             
             rider_scores[first].append(pred_y)
             rider_scores[second].append( - pred_y)
@@ -901,14 +944,14 @@ def evaluate():
     model.load_model()
 
     """Evaluate model"""
-    # X, y, x_weights = model.to_xgboost_format(
-    #     result_features_df=results_features, 
-    #     riders_yearly_data=riders_yearly_data, 
-    #     races_features_df = races_features 
-    # )
-    # X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
+    X, y, x_weights = model.to_xgboost_format(
+        result_features_df=results_features, 
+        riders_yearly_data=riders_yearly_data, 
+        races_features_df = races_features 
+    )
+    X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
 
-    # model.evaluate_model(X_test, y_test, test_weights=test_weights)
+    model.evaluate_model(X_test, y_test, test_weights=test_weights)
 
     print("Model evaluated")
 
@@ -920,24 +963,25 @@ def evaluate():
     tdf_2024_20_id = "R5e8c7e1a"
     some_other = "R859481ad"
     
-    # predict_race(
-    #     startlist_df=results_features.filter(
-    #         pl.col("race_id") == rvv_id
-    #     ).select(pl.col("name").alias("rider"), "team"),
-    #     race_stats_df=races_df.filter(pl.col("race_id") == rvv_id)
-    # )
     predict_race(
         startlist_df=results_features.filter(
-            pl.col("race_id") == some_other
+            pl.col("race_id") == rvv_id
         ).select(pl.col("name").alias("rider"), "team"),
-        race_stats_df=races_df.filter(pl.col("race_id") == some_other)
+        race_stats_df=races_df.filter(pl.col("race_id") == rvv_id)
     )
-    actual_result = results_features.filter(pl.col("race_id") == some_other).sort("rank")\
-        .select("name", "rank").head(10)
-    print(actual_result)
+    print("-----------------")
+    # predict_race(
+    #     startlist_df=results_features.filter(
+    #         pl.col("race_id") == tdf_2024_20_id
+    #     ).select(pl.col("name").alias("rider"), "team"),
+    #     race_stats_df=races_df.filter(pl.col("race_id") == tdf_2024_20_id)
+    # )
+    # actual_result = results_features.filter(pl.col("race_id") == tdf_2024_20_id).sort("rank")\
+    #     .select("name", "rank").head(10)
+    # print(actual_result)
 
 def main():
-    # train()
+    train()
     evaluate()
 
 if __name__ == "__main__":

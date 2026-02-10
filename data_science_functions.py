@@ -449,7 +449,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     ]
     windows = {
         "1110d": 1110,
-        # "370d": 370,
+        "370d": 370,
     }
     rank_thresholds = [
         25,
@@ -461,7 +461,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     #create buckets:
     races_bucketed = races.with_columns(
         [
-            pl.col(c).qcut(3, labels=["1", "2", "3"]).alias(f"{c}_bucket").cast(pl.Categorical)
+            pl.col(c).qcut(5, labels=["1", "2", "3", "4", "5"]).alias(f"{c}_bucket").cast(pl.Categorical)
             for c in race_features_to_bucket_on
         ]
     )
@@ -479,7 +479,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         )
         .alias(f"top_{rank_threshold}_in_{bucket_feature}_{bucket}")
         for bucket_feature in race_features_to_bucket_on
-        for bucket in ["1", "2", "3"]
+        for bucket in ["1", "2", "3", "4", "5"]
         for rank_threshold in rank_thresholds
     ] 
 
@@ -557,7 +557,7 @@ def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.Data
     pre_embed_array = pre_embed_features.select(feature_cols).to_numpy()
     pre_embed_array = StandardScaler().fit_transform(pre_embed_array)
 
-    pca = PCA(n_components=10)
+    pca = PCA(n_components=20)
     embedded_array = pca.fit_transform(pre_embed_array)
 
     #INSPECT WITH
@@ -596,7 +596,7 @@ def create_races_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl
     )
     return races_embeddings
 
-def calculate_cosine_similarity_polars(df, n_dims=10):
+def calculate_cosine_similarity_polars(df, n_dims=20):
     # Build expressions for dot product
     dot_product = pl.lit(0.0)
     norm1_sq = pl.lit(0.0)
@@ -644,14 +644,22 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
 
     dfs = []
     results = results.join(
-        races.select(["race_id", pl.col("date").str.to_date()]),
+        races.select(["race_id", pl.col("date").str.to_date(), "startlist_score"]),
         on = "race_id",
         how = "left"
+    )
+    results = results.with_columns(
+        (pl.when(pl.col("rank") <= 3).then(8.333).
+        otherwise(pl.when(
+            pl.col("rank") <= 10).then(2.5)
+            .otherwise(pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
+        )) * pl.col("startlist_score")).alias("points"),
     )
     bare_results = results.select([
         "name",
         "date",
-        "rank"
+        "rank",
+        "points"
     ]).sort("date")
 
     for label, offset in windows.items():
@@ -677,6 +685,7 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
                 (pl.when(pl.col("rank") < 3).then(1)
                     .otherwise(None)
                 ).sum().alias(f"nr_top3_{label}"),
+                pl.col("points").sum().alias(f"strength_{label}"),
             ).rename({f"_window_date_{label}": "date"})
         )
     
@@ -686,10 +695,10 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     # -------- team features ----------
     #top 10 is 2.5 times harder than top 25, top 3 is 8.3 times harder than top 25, so we can weight them accordingly
     #but dont count doubles
-    results = results.with_columns(
-        [(pl.col(f"nr_top25_{label}") + (2.5 - 1) * pl.col(f"nr_top10_{label}") + (8.33 - 1 - 1.5) * pl.col(f"nr_top3_{label}"))
-        .alias(f"strength_{label}") for label in windows.keys()]
-    )
+    # results = results.with_columns(
+    #     [(pl.col(f"nr_top25_{label}") + (2.5 - 1) * pl.col(f"nr_top10_{label}") + (8.33 - 1 - 1.5) * pl.col(f"nr_top3_{label}"))
+    #     .alias(f"strength_{label}") for label in windows.keys()]
+    # )
     results = results.with_columns(
         pl.col("strength_370d").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
     )
@@ -798,7 +807,7 @@ def main():
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     necessary_races = races_df.filter(
         pl.col("startlist_score") > 200
-    )
+    ).filter(pl.col("stage").is_null())
     # riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
     necessary_results = results_df.join(
         necessary_races.select("race_id"),
@@ -853,8 +862,8 @@ def assert_embedding_similarity():
 
 if __name__ == "__main__":
     # create_normalized_race_data()
-    # main()
-    assert_embedding_dimension()
+    main()
+    # assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()
