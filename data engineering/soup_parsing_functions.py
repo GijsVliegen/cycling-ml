@@ -60,7 +60,8 @@ def parse_calendar_page(soup) -> tuple[list[str], list[str]]:
             gc_races.append(base_race_url)
             race_urls.pop(i)
     
-    return race_urls, gc_races
+
+    return [a for a in race_urls if a.endswith("result")], gc_races
 
 # async def fetch_races_for_year(client, year):
 #     """

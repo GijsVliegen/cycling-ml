@@ -24,7 +24,7 @@ from sklearn.metrics import (
     confusion_matrix,
     classification_report
 )
-
+from data_science_functions import EMBEDDING_SIZE
 class RaceModel:
     """
     XGboost on pairs of riders predicting who will win
@@ -51,12 +51,9 @@ class RaceModel:
 
         self.embed_features = [
             f"embed_{i}"
-            for i in range(1, 21)
+            for i in range(1, EMBEDDING_SIZE+1)
         ]
-        self.rider_result_features = [
-            # 'specialty', #needs to be encoded
-            # 'team',
-            # 'age',
+        self.rider_diff_features = [
             'nr_races_participated_1110d',
             'nr_top25_1110d',
             'nr_top10_1110d',
@@ -72,6 +69,8 @@ class RaceModel:
             'nr_top10_40d',
             'nr_top3_40d',
             "strength_40d",
+        ]
+        self.rider_result_features = self.rider_diff_features + [
             "cosine_similarity",
             "relative_team_strength_rank"
         ] + self.embed_features
@@ -80,8 +79,6 @@ class RaceModel:
             "racedays",
             "kms",
             "wins",
-            # "top_3s",
-            # "top_10s",
         ]
         self.race_features = [ 
             "distance_km",
@@ -129,18 +126,19 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=200,
-            evals=[],
+            num_boost_round=1000,
+            evals=[(dtest, "test")],
             params = {
-                "objective": "reg:squarederror",
-                "eval_metric": "rmse",
-                # "objective": "binary:logistic",
-                # "eval_metric": "logloss",
+                # "objective": "reg:squarederror",
+                # "eval_metric": "rmse",
+                "objective": "binary:logistic",
+                "eval_metric": "logloss",
                 "min_child_weight": 10,
-                "max_depth": 4,
+                "max_depth": 6,
                 "tree_method": "hist",
                 # "max_bin": 3,
                 "early_stopping_rounds": 50,
+                "learning_rate": 0.05,   # ↓↓↓
                 # "subsample": 0.05,
             },
             callbacks=[PrintIterationCallback()],
@@ -227,6 +225,7 @@ class RaceModel:
             y.append(values_to_predict)
 
         y = np.concatenate(y)
+        y = (y + 1) / 2 #convert -1,1 to 0,1
         X = np.vstack(X)
         X_weights = np.array([1] * len(y))
         print(f"training on {len(y)} pairs")
@@ -241,7 +240,7 @@ class RaceModel:
         race_year: int,
         race_id: str,
         ordering: np.ndarray
-    ) -> np.ndarray:    
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:    
         """
         rider_pairs, list of tuples of rider names, for a whole race (thousands of pairs)
 
@@ -264,8 +263,11 @@ class RaceModel:
             ).fill_null(
                 np.NAN
             ).select(self.rider_result_features)
-            rider_0_data: np.array = rider_0_data.to_numpy().astype(np.float32).astype(np.float32, copy=False)
+            rider_0_data_for_diff = rider_0_data.select(self.rider_diff_features)
+            rider_0_data_for_diff: np.array = rider_0_data_for_diff.to_numpy().astype(np.float32, copy=False)
+            rider_0_data: np.array = rider_0_data.to_numpy().astype(np.float32, copy=False)
             rider_0_data[np.isnan(rider_0_data)] = 0.0
+            rider_0_data_for_diff[np.isnan(rider_0_data_for_diff)] = 0.0
             rider_1_data: pl.DataFrame = race_results.join(
                 rider_filters.unique(subset=["name_0","name_1"], maintain_order=True).select("name_1"),
                 left_on=["name"],
@@ -274,9 +276,12 @@ class RaceModel:
             ).fill_null(
                 np.NAN
             ).select(self.rider_result_features)
-            rider_1_data: np.array = rider_1_data.to_numpy().astype(np.float32).astype(np.float32, copy=False)
+            rider_1_data_for_diff = rider_1_data.select(self.rider_diff_features)
+            rider_1_data_for_diff: np.array = rider_1_data_for_diff.to_numpy().astype(np.float32, copy=False)
+            rider_1_data: np.array = rider_1_data.to_numpy().astype(np.float32, copy=False)
             rider_1_data[np.isnan(rider_1_data)] = 0.0
-            return rider_0_data, rider_1_data
+            rider_1_data_for_diff[np.isnan(rider_1_data_for_diff)] = 0.0
+            return rider_0_data, rider_1_data, rider_0_data_for_diff - rider_1_data_for_diff
 
         def get_rider_yearly_data(rider_filters: pl.DataFrame) -> tuple[np.array, np.array]:
             rider_0_yearly_data: pl.DataFrame = riders_yearly_data.join(
@@ -313,12 +318,12 @@ class RaceModel:
             for rider_pair_names, order in zip(rider_pairs, ordering)
             for year in years_to_go_back
         )
-        rider_0_data, rider_1_data = get_riders_result_data(rider_filters)
+        rider_0_data, rider_1_data, rider_diff_data = get_riders_result_data(rider_filters)
         rider_0_yearly_data, rider_1_yearly_data = get_rider_yearly_data(rider_filters)
 
         yearly_feature_cols = rider_0_yearly_data - rider_1_yearly_data
 
-        feature_cols = np.hstack([rider_0_data, rider_1_data])
+        feature_cols = np.hstack([rider_0_data, rider_1_data, rider_diff_data])
         if feature_cols.shape[0] != yearly_feature_cols.shape[0]:
             raise ValueError("Feature columns shape does not match number of rider pairs")
             
@@ -446,7 +451,7 @@ class RaceModel:
 
     def evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray, test_weights: np.ndarray) -> None:
         dtest = xgb.DMatrix(X_test, label=y_test, weight=test_weights)
-        y_pred_proba = self.bst.predict(dtest)
+        y_pred_proba = self.bst.predict(dtest, output_margin=True)
         # accuracy = np.mean(y_pred == y_test)
         # auc = roc_auc_score(y_test, self.bst.predict(dtest))
         # print(f"Test Accuracy: {accuracy:.4f}")
@@ -457,8 +462,8 @@ class RaceModel:
         y_pred explained:
         - by default, threshold is 0
         """
-        y_pred = (y_pred_proba >= 0).astype(int) 
-        y_test_class = (y_test >= 0).astype(int)  #convert -1,1 to 0,1
+        y_pred = (y_pred_proba >= 0.5).astype(int) 
+        y_test_class = (y_test == 1).astype(int)  #convert -1,1 to 0,1
         # Compute metrics
         accuracy = accuracy_score(y_test_class, y_pred)
         precision = precision_score(y_test_class, y_pred, zero_division=0)
@@ -544,6 +549,8 @@ class RaceModel:
 
     #     pass
 
+from data_science_functions import filter_data
+
 def train():
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
@@ -551,13 +558,21 @@ def train():
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
 
+    riders_yearly_data = riders_yearly_data.with_columns(
+        pl.all().replace(-1, 0)
+    )
+    necessary_races, necessary_results = filter_data(
+        races_df = races_df,
+        results_df = result_features_df,
+    )
+
     results_features = results_embedded_df.join(
-        result_features_df,
+        necessary_results,
         on = ["race_id", "name"],
         how="left"
     )
     races_features = races_embedded_df.join(
-        races_df,
+        necessary_races,
         on = ["race_id"],
         how="left"
     )
@@ -838,9 +853,15 @@ def predict_race(startlist_df, race_stats_df):
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     results_df = pl.read_parquet("data_v2/results_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    
     races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     """Prepare data of race and riders to give to xgboost"""
+    
+    riders_yearly_data = riders_yearly_data.with_columns(
+        pl.all().replace(-1, 0)
+    )
+    necessary_races, necessary_results = filter_data(races_df, results_df)
 
     # new_race_normalized = normalize_new_race_data(
     #     new_race = race_stats_df,
@@ -854,7 +875,7 @@ def predict_race(startlist_df, race_stats_df):
     race_embedding = get_new_race_embedding(
         race_to_find_for = race_stats_df,
         old_embeddings = races_embedded_df,
-        old_races = races_df,
+        old_races = necessary_races,
     )
     race_feats = race_embedding.join(
         race_stats_df,
@@ -864,8 +885,8 @@ def predict_race(startlist_df, race_stats_df):
     rider_feats = get_rider_features(
         new_race=race_stats_df,
         startlist=startlist_df,
-        results = results_df,
-        races=races_df
+        results = necessary_results,
+        races=necessary_races
     )
     rider_embeddings = get_rider_embeddings(
         startlist = startlist_df,
@@ -929,14 +950,19 @@ def evaluate():
     races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
+    
+    riders_yearly_data = riders_yearly_data.with_columns(
+        pl.all().replace(-1, 0)
+    )
+    necessary_races, necessary_results = filter_data(races_df, result_features_df)
 
     results_features = results_embedded_df.join(
-        result_features_df,
+        necessary_results,
         on = ["race_id", "name"],
         how="left"
     )
     races_features = races_embedded_df.join(
-        races_df,
+        necessary_races,
         on = ["race_id"],
         how="left"
     )
@@ -944,14 +970,14 @@ def evaluate():
     model.load_model()
 
     """Evaluate model"""
-    X, y, x_weights = model.to_xgboost_format(
-        result_features_df=results_features, 
-        riders_yearly_data=riders_yearly_data, 
-        races_features_df = races_features 
-    )
-    X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
+    # X, y, x_weights = model.to_xgboost_format(
+    #     result_features_df=results_features, 
+    #     riders_yearly_data=riders_yearly_data, 
+    #     races_features_df = races_features 
+    # )
+    # X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
 
-    model.evaluate_model(X_test, y_test, test_weights=test_weights)
+    # model.evaluate_model(X_test, y_test, test_weights=test_weights)
 
     print("Model evaluated")
 
@@ -981,7 +1007,7 @@ def evaluate():
     # print(actual_result)
 
 def main():
-    train()
+    # train()
     evaluate()
 
 if __name__ == "__main__":

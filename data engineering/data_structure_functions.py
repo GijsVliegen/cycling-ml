@@ -97,25 +97,25 @@ def fetch_year_race_urls(year: int) -> list[str]:
         "1.1", #GP samyn is 1.1
     ]
     all_race_urls = []
-    for classification in classifications_to_search:
-        calender_url = f"{BASE_URL}/races.php?year={year}&circuit=&class={classification}"
-        try:
-            calender_soup = load_soups_from_http(calender_url)[0]
-        except:
-            print(f"exception for retrieving calendar page {calender_url}")
-            continue
-        race_urls, gc_urls = parse_calendar_page(calender_soup)
+    # for classification in classifications_to_search:
+    calender_url = f"{BASE_URL}/races.php?s=&year={year}&circuit=&class=&filter=Filter"
+    try:
+        calender_soup = load_soups_from_http(calender_url)[0]
+    except Exception as e:
+        print(f"exception for retrieving calendar page {calender_url}: {e}")
+        return []
+    race_urls, gc_urls = parse_calendar_page(calender_soup)
 
-        for gc_url in gc_urls:
-            print(f"Fetching GC page: {gc_url}")
-            try:
-                gc_soup = load_soups_from_http(gc_url)[0]
-            except:
-                print(f"exception for retrieving gc page {gc_url}")
-                continue
-            stage_urls = parse_gc_page(gc_soup)
-            race_urls.extend(stage_urls)
-        all_race_urls.extend(race_urls)
+    for gc_url in gc_urls:
+        print(f"Fetching GC page: {gc_url}")
+        try:
+            gc_soup = load_soups_from_http(gc_url)[0]
+        except:
+            print(f"exception for retrieving gc page {gc_url}")
+            continue
+        stage_urls = parse_gc_page(gc_soup)
+        race_urls.extend(stage_urls)
+    all_race_urls.extend(race_urls)
     
     with open(f"urls/races_{year}.txt", "w") as f:
         f.write("\n".join(all_race_urls))
@@ -128,15 +128,22 @@ def download_rider_pages() -> list[dict]:
     returns logs
     """
     downloaded_riders = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    races_df = pl.read_parquet("data_v2/races_df.parquet").filter(
+        pl.col("startlist_score") > 200
+    )
+    results_not_downloaded = pl.read_parquet("data_v2/results_df.parquet").join(
+        races_df.select("race_id"),
+        on="race_id",
+        how="inner"
+    )
     
-    results_not_downloaded = (pl.read_parquet("data_v2/results_df.parquet")
-        .group_by("name")
-        .agg(pl.count())
-        .filter(pl.col("count") >= 5)).select("name").unique().join(
-            downloaded_riders.select("name").unique(),
-            on="name",
-            how="anti"
-        )
+    #     .group_by("name")
+    #     .agg(pl.count())
+    #     # .filter(pl.col("count") >= 5)).select("name").unique().join(
+    #     #     downloaded_riders.select("name").unique(),
+    #     #     on="name",
+    #     #     how="anti"
+    #     # )
     rider_names = results_not_downloaded["name"].to_list()
     print(f"Downloading pages for {len(rider_names)} riders")
     log_messages = []
@@ -432,7 +439,7 @@ def make_races_results_df():
         (race["name"], race["year"]) 
         for race in current_races_df.select(["name", "year"]).unique().to_dicts()
     ]
-    year_range = range(2022, 2026)
+    year_range = range(2013, 2026)
     logs = []
     for year in year_range:
         races_df, results_df, parse_logs = parse_races_to_polars(
@@ -526,12 +533,12 @@ def main():
 
     # for i in range(2013, 2026):
     #     fetch_year_race_urls(i)
-    downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
+    # downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
     # for i in range(2013, 2026):
     #     more_logs = download_year_races(i, downloaded_races)
     #     logs += more_logs
 
-    # more_logs = make_races_results_df()
+    more_logs = make_races_results_df()
     # logs += more_logs
     
     more_logs = download_rider_pages()

@@ -47,6 +47,8 @@ from sklearn.discriminant_analysis import StandardScaler
             - Hills = 127 k
 """
 
+EMBEDDING_SIZE = 10 
+
 def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalized_races_df: pl.DataFrame, k = 5) -> pl.DataFrame:
     """
     Find knn neighbors based on race info:
@@ -449,7 +451,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     ]
     windows = {
         "1110d": 1110,
-        "370d": 370,
+        # "370d": 370,
     }
     rank_thresholds = [
         25,
@@ -461,7 +463,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     #create buckets:
     races_bucketed = races.with_columns(
         [
-            pl.col(c).qcut(5, labels=["1", "2", "3", "4", "5"]).alias(f"{c}_bucket").cast(pl.Categorical)
+            pl.col(c).qcut(3, labels=["1", "2", "3"]).alias(f"{c}_bucket").cast(pl.Categorical)
             for c in race_features_to_bucket_on
         ]
     )
@@ -479,7 +481,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         )
         .alias(f"top_{rank_threshold}_in_{bucket_feature}_{bucket}")
         for bucket_feature in race_features_to_bucket_on
-        for bucket in ["1", "2", "3", "4", "5"]
+        for bucket in ["1", "2", "3"]
         for rank_threshold in rank_thresholds
     ] 
 
@@ -557,7 +559,7 @@ def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.Data
     pre_embed_array = pre_embed_features.select(feature_cols).to_numpy()
     pre_embed_array = StandardScaler().fit_transform(pre_embed_array)
 
-    pca = PCA(n_components=20)
+    pca = PCA(n_components=EMBEDDING_SIZE)
     embedded_array = pca.fit_transform(pre_embed_array)
 
     #INSPECT WITH
@@ -596,7 +598,7 @@ def create_races_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl
     )
     return races_embeddings
 
-def calculate_cosine_similarity_polars(df, n_dims=20):
+def calculate_cosine_similarity_polars(df, n_dims=EMBEDDING_SIZE):
     # Build expressions for dot product
     dot_product = pl.lit(0.0)
     norm1_sq = pl.lit(0.0)
@@ -799,22 +801,25 @@ def create_normalized_race_data():
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
+def filter_data(races_df: pl.DataFrame, results_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+    necessary_races = races_df.filter(
+        pl.col("startlist_score") > 200
+    ).filter(pl.col("stage").is_null())
+    necessary_results = results_df.join(
+        necessary_races.select("race_id"),
+        on = "race_id",
+        how = "inner"
+    )
+    return necessary_races, necessary_results
+
 def main():
     """create features dataframe"""
     pl.Config.set_tbl_cols(-1)
 
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
-    necessary_races = races_df.filter(
-        pl.col("startlist_score") > 200
-    ).filter(pl.col("stage").is_null())
-    # riders_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
-    necessary_results = results_df.join(
-        necessary_races.select("race_id"),
-        on = "race_id",
-        how = "inner"
-    )
-    
+    necessary_races, necessary_results = filter_data(races_df, results_df)
+
     normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
     # races_features_df = create_race_features_table(
     #     races=races_df, 
@@ -823,9 +828,9 @@ def main():
     # )
     # races_features_df.write_parquet("data_v2/races_features_df.parquet") 
 
-    result_features_df = create_result_features_table(results=necessary_results, races=races_df)    
+    result_features_df = create_result_features_table(results=necessary_results, races=necessary_races)    
     pre_embed_features_df = create_result_features_pre_embed(results=necessary_results, races=normalized_races_df)
-    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=races_df, results_df=necessary_results)
+    results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=necessary_races, results_df=necessary_results)
     races_embedded_df = create_races_embeddings(
         results_df = necessary_results,
         results_embedded_df = results_embedded_df)
@@ -862,8 +867,8 @@ def assert_embedding_similarity():
 
 if __name__ == "__main__":
     # create_normalized_race_data()
-    main()
-    # assert_embedding_dimension()
+    # main()
+    assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()

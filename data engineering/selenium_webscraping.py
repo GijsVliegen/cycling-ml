@@ -36,7 +36,7 @@ def download_page(url: str, output_dir=html_storage_dir) -> str:
 
     #skip if already exists
     if os.path.exists(filepath):
-        print(f"skipped")
+        # print(f"skipped")
         log_messages = [f"File already exists, skipping download: {filepath}"]
         return filepath,log_messages
     
@@ -80,12 +80,10 @@ def load_soups_from_http(url: str | list[str]) -> list[BeautifulSoup]:
         url = [url]
     for single_url in url:
 
-        url = "https://www.procyclingstats.com/race/tour-de-france/2025"
-
         session = requests.Session()
 
         response = session.get(
-            url,
+            single_url,
             impersonate="chrome120",
             headers={
                 "Accept-Language": "en-US,en;q=0.9",
@@ -94,7 +92,7 @@ def load_soups_from_http(url: str | list[str]) -> list[BeautifulSoup]:
         )
 
         soup = BeautifulSoup(response.text, "html.parser")
-        soups.add(soup)
+        soups.append(soup)
 
         
     #     driver.get(single_url)
