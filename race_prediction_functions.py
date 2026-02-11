@@ -415,6 +415,7 @@ from xgboost_functions import RaceModel, \
     add_embedding_similarity_for_new_race, \
     new_race_to_xgboost_format, \
     get_rider_features, get_rider_embeddings
+
 def main():
     startlist_df = pl.read_parquet("data_v2/new_race_startlist.parquet")
     race_stats_df = pl.read_parquet("data_v2/new_race_stats.parquet")
