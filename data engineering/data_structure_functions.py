@@ -503,7 +503,7 @@ def get_missing_races_overview(year: int):
 
 def main_new():
     """Get data for prediction of future race"""
-    races = [("alula-tour", 3)]
+    races = [("omloop-het-nieuwsblad", -1)]
     
     startlist_urls = [
         f"{BASE_URL}/race/{race}/2026/startlist"
@@ -538,15 +538,15 @@ def main():
     #     more_logs = download_year_races(i, downloaded_races)
     #     logs += more_logs
 
-    more_logs = make_races_results_df()
+    # more_logs = make_races_results_df()
     # logs += more_logs
     
-    more_logs = download_rider_pages()
-    logs += more_logs
-    more_logs = make_riders_stats_df()
-    logs += more_logs
+    # more_logs = download_rider_pages()
+    # logs += more_logs
+    # more_logs = make_riders_stats_df()
+    # logs += more_logs
 
-    # logs = main_new()
+    logs = main_new()
 
     with open(f"logs.txt", "w") as f:
         f.write("\n".join(logs))
