@@ -5,7 +5,7 @@
     "team_size": 20,
     "minimum_cost": 2,
     "points_per_race": {
-        "default": {
+        "World Tour": {
             "1": 100,
             "2": 80,
             "3": 65,
@@ -37,7 +37,7 @@
             "29": 1,
             "30": 1
         },
-        "monument": {
+        "Monument": {
             "1": 125,
             "2": 100,
             "3": 80,
@@ -69,7 +69,7 @@
             "29": 2,
             "30": 1
         },
-        "niet-WT": {
+        "Niet WorldTour": {
             "1": 80,
             "2": 64,
             "3": 52,
@@ -119,5 +119,100 @@
         "6": 6,
         "7": 10
     },
-    "winner_team_points": 10
+    "winner_team_points": 10,
+    "races": [{
+        "race": "Omloop Nieuwsblad",
+        "pcs_name": "omloop-het-nieuwsblad",
+        "type": "World Tour"
+    },
+    {
+        "race": "Kuurne-Brussel-Kuurne",
+        "pcs_name": "kuurne-brussel-kuurne",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Samyn Classic",
+        "pcs_name": "gp-samyn",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Strade Bianche",
+        "pcs_name": "strade-bianche",
+        "type": "World Tour"
+    },
+    {
+        "race": "Nokere Koerse",
+        "pcs_name": "nokere-koerse",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Bredene Koksijde Classic",
+        "pcs_name": "bredene-koksijde-classic",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Milaan-Sanremo",
+        "pcs_name": "milano-sanremo",
+        "type": "Monument"
+    },
+    {
+        "race": "Ronde van Brugge",
+        "pcs_name": "classic-brugge-de-panne",
+        "type": "World Tour"
+    },
+    {
+        "race": "E3 Saxo Classic",
+        "pcs_name": "e3-harelbeke",
+        "type": "World Tour"
+    },
+    {
+        "race": "In Flanders Fields",
+        "pcs_name": "gent-wevelgem",
+        "type": "World Tour"
+    },
+    {
+        "race": "Dwars door Vlaanderen",
+        "pcs_name": "dwars-door-vlaanderen",
+        "type": "World Tour"
+    },
+    {
+        "race": "Ronde van Vlaanderen",
+        "pcs_name": "ronde-van-vlaanderen",
+        "type": "Monument"
+    },
+    {
+        "race": "Scheldeprijs",
+        "pcs_name": "scheldeprijs",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Parijs-Roubaix",
+        "pcs_name": "paris-roubaix",
+        "type": "Monument"
+    },
+    {        
+        "race": "Ronde van Limburg",
+        "pcs_name": "ronde-van-limburg",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Brabantse Pijl",
+        "pcs_name": "brabantse-pijl",
+        "type": "Niet WorldTour"
+    },
+    {
+        "race": "Amstel Gold Race",
+        "pcs_name": "amstel-gold-race",
+        "type": "World Tour"
+    },
+    {
+        "race": "Waalse Pijl",
+        "pcs_name": "la-fleche-wallonne",
+        "type": "World Tour"
+    },
+    {
+        "race": "Luik-Bastenaken-Luik",
+        "pcs_name": "liege-bastogne-liege",
+        "type": "Monument"
+    }]
 }

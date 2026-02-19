@@ -1,3 +1,4 @@
+import math
 import polars as pl
 from datetime import datetime
 import re
@@ -208,51 +209,54 @@ def interpolate_profile_scores(races_df: pl.DataFrame) -> pl.DataFrame:
 
 import numpy as np
 
-def scores_to_probability_results(rider_scores: pl.DataFrame) -> pl.DataFrame:
+def scores_to_probability_results(rider_scores: pl.DataFrame, max_rank_to_predict: int = 10, temperature = 1) -> pl.DataFrame:
     """convert rider scores to probability of getting each result for each rider
 
     rider_scores should have a col "score"
     
     """
-    def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int = 10) -> Dict[int, List[float]]:
-        # edge cases
+    def compute_plackett_luce_probs(scores: List[float], max_rank_to_predict: int) -> Dict[int, List[float]]:
+        """
+        Approximate top-k Plackett-Luce probabilities.
+
+        Args:
+            scores: list or np.array of non-negative scores (length n)
+            max_rank: integer, maximum rank to compute probabilities for
+
+        Returns:
+            rank_probs: dict mapping rank -> np.array of probabilities
+                        rank_probs[1] is probability of each item finishing 1st, etc.
+        """
         n = len(scores)
         if n == 0:
             return []
-        total_sum = sum([
-            s if s > 0 else 0
-            for s in scores
-        ])
-        # if total_sum == 0:
-        #     return [[0.0] * n for _ in range(max_rank_to_predict)]
-        # scores = np.array(scores)
-        # weights = np.exp(scores)
-        # current_probs = weights / weights.sum()
-        current_probs = [
-            s / total_sum if s > 0 else 0.0
-            for s in scores
-        ]
-        rank_probs = {1: current_probs.copy()}
-        for pos in range(2, max_rank_to_predict + 1):
-            new_probs = [float(0.0)] * n
-            for i in range(n):
-                if scores[i] == 0:
-                    continue
-                for j in range(n):
-                    if j != i:
-                        denom = total_sum - scores[j]
-                        if denom > 0:
-                            new_probs[i] += current_probs[j] * (scores[i] / denom)
-            rank_probs[pos] = new_probs
-            current_probs = new_probs
+        scores = np.array(scores, dtype=float)
+        n = len(scores)
+        remaining = scores.copy()
+        rank_probs = {}
+
+        for k in range(1, max_rank_to_predict + 1):
+            total = remaining.sum()
+            if total == 0:
+                probs = np.zeros(n)
+            else:
+                probs = remaining / total
+            rank_probs[k] = list(probs.copy())
+            # zero out the item with highest probability to simulate sequential removal
+            # optional: if you want strictly sequential draws
+            # remaining[np.argmax(probs)] = 0.0
+            remaining = remaining * (1 - probs)
+
         return rank_probs
 
     # Usage
-    scores = rider_scores["score"].to_list()
-    rank_probs = compute_plackett_luce_probs(scores)
+    scores = rider_scores["score"].head(max_rank_to_predict).to_list()
+    scores = [math.exp(s / temperature) for s in scores] # apply temperature
+    rank_probs = compute_plackett_luce_probs(scores, max_rank_to_predict)
+    padding = [0.0] * (rider_scores.height - max_rank_to_predict)
     for k in range(1, len(rank_probs) + 1):
         rider_scores = rider_scores.with_columns(
-            pl.Series(f"rank_{k}_prob", rank_probs[k]), strict = False
+            pl.Series(f"rank_{k}_prob", rank_probs[k] + padding), strict = False
         )
 
     return rider_scores
@@ -272,57 +276,57 @@ RACE_SIMILARITY_COLS = [
     "profile_score_last_25k",
     "final_km_percentage"
 ]
-def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
-    """
-    closest 5 races in the same stage-race over last 3 years
+# def get_closest_5_races_to_stage_race(races: pl.DataFrame) -> pl.DataFrame:
+#     """
+#     closest 5 races in the same stage-race over last 3 years
 
-    """
-    duplicate_races = races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
-        races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
-        on = ["name"]
-    ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
-    ).filter(
-        pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
-    ).filter(
-        ~ (pl.col("race_id") == pl.col("race_id_right"))
-    )
-    #TODO years should be replaced by dates, so only earlier stages are taken
-    # not critical tho
-    duplicate_races_normalized = duplicate_races.with_columns(
-        *[
-            (
-                (pl.col(c) - pl.col(f"{c}_right").min()) 
-                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
-            ).over("name").alias(f"{c}_normalised")
-            for c in RACE_SIMILARITY_COLS
-        ],
-        *[
-            (
-                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
-                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
-            ).over("name").alias(f"{c}_normalised_right")
-            for c in RACE_SIMILARITY_COLS
-        ]
-    )
-    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
-        (
-            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
-        ).alias(f"{c}_distance")
-        for c in RACE_SIMILARITY_COLS
-    ])
-    duplicate_races_distance = duplicate_races_distance_part.with_columns(
-        (pl.sum_horizontal([
-            pl.col(f"{c}_distance") 
-            for c in RACE_SIMILARITY_COLS
-        ])
-        ).sqrt().alias("total_distance")
-    )
-    closest_races_distance = duplicate_races_distance.sort(
-        "total_distance", descending=False
-    ).group_by("race_id").head(5).select("race_id", "race_id_right", "total_distance")
+#     """
+#     duplicate_races = races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+#         races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
+#         on = ["name"]
+#     ).filter(
+#         pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
+#     ).filter(
+#         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
+#     ).filter(
+#         ~ (pl.col("race_id") == pl.col("race_id_right"))
+#     )
+#     #TODO years should be replaced by dates, so only earlier stages are taken
+#     # not critical tho
+#     duplicate_races_normalized = duplicate_races.with_columns(
+#         *[
+#             (
+#                 (pl.col(c) - pl.col(f"{c}_right").min()) 
+#                 / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+#             ).over("name").alias(f"{c}_normalised")
+#             for c in RACE_SIMILARITY_COLS
+#         ],
+#         *[
+#             (
+#                 (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+#                 / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+#             ).over("name").alias(f"{c}_normalised_right")
+#             for c in RACE_SIMILARITY_COLS
+#         ]
+#     )
+#     duplicate_races_distance_part = duplicate_races_normalized.with_columns([
+#         (
+#             (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
+#         ).alias(f"{c}_distance")
+#         for c in RACE_SIMILARITY_COLS
+#     ])
+#     duplicate_races_distance = duplicate_races_distance_part.with_columns(
+#         (pl.sum_horizontal([
+#             pl.col(f"{c}_distance") 
+#             for c in RACE_SIMILARITY_COLS
+#         ])
+#         ).sqrt().alias("total_distance")
+#     )
+#     closest_races_distance = duplicate_races_distance.sort(
+#         "total_distance", descending=False
+#     ).group_by("race_id").head(5).select("race_id", "race_id_right", "total_distance")
 
-    return closest_races_distance
+#     return closest_races_distance
 
 
 # def create_race_features_table(races: pl.DataFrame, results: pl.DataFrame, riders: pl.DataFrame) -> pl.DataFrame:
