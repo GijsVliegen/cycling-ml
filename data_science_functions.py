@@ -594,32 +594,42 @@ def create_races_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl
         on = ["name", "race_id"],
         how = "left"
     )
+    results_embedded_df = results_embedded_df.with_columns(
+        pl.when(pl.col("rank") < 3).then(3)
+        .otherwise(pl.when(pl.col("rank") < 10).then(2)
+        .otherwise(1)).alias("rank_weight")
+    )
+    
     races_embeddings = results_embedded_df.group_by("race_id").agg(
         [
-            pl.col(f"embed_{i+1}").mean().alias(f"embed_{i+1}")
-            for i in range(len(results_embedded_df.columns) - 4)
+            (   
+                (pl.col(f"embed_{i+1}") * pl.col("rank_weight")).sum() 
+                / pl.col("rank_weight").sum()
+            ).alias(f"embed_{i+1}")
+            # pl.col(f"embed_{i+1}").mean().alias(f"embed_{i+1}")
+            for i in range(len(results_embedded_df.columns) - 5)
         ]
     )
     return races_embeddings
 
 def calculate_cosine_similarity_polars(df, n_dims=EMBEDDING_SIZE):
     # Build expressions for dot product
-    dot_product = pl.lit(0.0)
-    norm1_sq = pl.lit(0.0)
-    norm2_sq = pl.lit(0.0)
-    
-    for i in range(1, n_dims + 1):
-        col1 = f"embed_{i}"
-        col2 = f"embed_{i}_right"
-        
-        dot_product = dot_product + (pl.col(col1) * pl.col(col2))
-        norm1_sq = norm1_sq + (pl.col(col1) ** 2)
-        norm2_sq = norm2_sq + (pl.col(col2) ** 2)
-    
-    # Cosine similarity = dot_product / (norm1 * norm2)
-    cosine_sim = dot_product / (norm1_sq.sqrt() * norm2_sq.sqrt())
-    
-    return df.with_columns(cosine_sim.alias("cosine_similarity"))
+    left_cols = [pl.col(f"embed_{i}") for i in range(1, n_dims + 1)]
+    right_cols = [pl.col(f"embed_{i}_right") for i in range(1, n_dims + 1)]
+
+    # Cosine similarity
+    dot_product = pl.sum_horizontal([l * r for l, r in zip(left_cols, right_cols)])
+    norm1 = pl.sum_horizontal([c ** 2 for c in left_cols]).sqrt()
+    norm2 = pl.sum_horizontal([c ** 2 for c in right_cols]).sqrt()
+    cosine_sim = dot_product / (norm1 * norm2)
+
+    # L1 distance
+    l1_distance = pl.sum_horizontal([ (l - r).abs() for l, r in zip(left_cols, right_cols) ])
+
+    return df.with_columns([
+        cosine_sim.alias("cosine_similarity"),
+        l1_distance.alias("l1_distance")
+    ])
 
 def add_embedding_similarity_to_results_df(
     results_embedded_df: pl.DataFrame,
@@ -634,7 +644,7 @@ def add_embedding_similarity_to_results_df(
     embedding_similary = calculate_cosine_similarity_polars(results_w_race_embeddings)
 
     return results_embedded_df.join(
-        embedding_similary.select(["name", 'race_id', "cosine_similarity"]),
+        embedding_similary.select(["name", 'race_id', "cosine_similarity", "l1_distance"]),
         on = ["name", 'race_id'],
         how="left"
     )
@@ -667,10 +677,11 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
         "rank",
         "points"
     ]).sort("date")
+    lf = bare_results.lazy()
 
     for label, offset in windows.items():
         dfs.append(
-            bare_results.with_columns(
+            lf.with_columns(
                 (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
             ).group_by_dynamic(
                 index_column=f"_window_date_{label}",
@@ -692,7 +703,9 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
                     .otherwise(None)
                 ).sum().alias(f"nr_top3_{label}"),
                 pl.col("points").sum().alias(f"strength_{label}"),
-            ).rename({f"_window_date_{label}": "date"})
+            )
+            .rename({f"_window_date_{label}": "date"})
+            .collect(streaming=True)
         )
     
     for d in dfs:
@@ -806,9 +819,13 @@ def create_normalized_race_data():
     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
 def filter_data(races_df: pl.DataFrame, results_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """FIlters on
+     -> startlist score > 200, to focus on more competitive races
+     -> filter on stages? NO!
+     """
     necessary_races = races_df.filter(
         pl.col("startlist_score") > 200
-    ).filter(pl.col("stage").is_null())
+    )#.filter(pl.col("stage").is_null())
     necessary_results = results_df.join(
         necessary_races.select("race_id"),
         on = "race_id",
@@ -831,8 +848,26 @@ def main():
     #     riders=riders_df
     # )
     # races_features_df.write_parquet("data_v2/races_features_df.parquet") 
-
-    result_features_df = create_result_features_table(results=necessary_results, races=necessary_races)    
+    spine = necessary_results.select("name", "race_id")
+    years = necessary_races.select("year").unique().cast(pl.Int64).sort("year").to_series().to_list()
+    necessary_results_with_years = necessary_results.join(
+        necessary_races.select("race_id", "year"),
+        on = "race_id",
+        how = "left"
+    )
+    part_results = []
+    for i in range(len(years)-4):
+        allowed_years = [str(year) for year in years[i:i+5]]
+        part_necessary_races = necessary_races.filter(pl.col("year").is_in(allowed_years))
+        part_necessary_results  = necessary_results_with_years.filter(pl.col("year").is_in(allowed_years))
+        part_results_features_df = create_result_features_table(
+            results=part_necessary_results, 
+            races=part_necessary_races
+        )
+        part_results.append(part_results_features_df)
+    result_features_df = pl.concat(part_results).unique()
+    
+    # result_features_df = create_result_features_table(results=necessary_results, races=necessary_races)    
     pre_embed_features_df = create_result_features_pre_embed(results=necessary_results, races=normalized_races_df)
     results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=necessary_races, results_df=necessary_results)
     races_embedded_df = create_races_embeddings(
@@ -870,9 +905,9 @@ def assert_embedding_similarity():
 
 
 if __name__ == "__main__":
-    # create_normalized_race_data()
-    # main()
-    assert_embedding_dimension()
+    create_normalized_race_data()
+    main()
+    # assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()

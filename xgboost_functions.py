@@ -71,8 +71,9 @@ class RaceModel:
             'nr_top3_40d',
             "strength_40d",
             "cosine_similarity",
+            "l1_distance",
             "relative_team_strength_rank"
-        ]
+        ] + self.embed_features
         self.rider_yearly_features = [
             "points",
             "racedays",
@@ -88,7 +89,7 @@ class RaceModel:
             # "classification", #needs to be encoded
             "year",
             "startlist_score", #Check present in pairs
-        ]
+        ] + self.embed_features
 
     def save_model(self) -> None:
         self.bst.save_model("data_v2/xgboost_model.json")
@@ -109,7 +110,7 @@ class RaceModel:
         train_errors = []
         class PrintIterationCallback(xgb.callback.TrainingCallback):
             def after_iteration(xgb_self, model, epoch, evals_log):
-                if epoch % 10 == 0:
+                if epoch % 50 == 0:
                     test_y_pred = model.predict(dtest)
                     train_y_pred = model.predict(dtrain)
 
@@ -125,7 +126,7 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=500,
+            num_boost_round=1001,
             evals=[(dtrain, "train"), (dtest, "test")],
             params = {
                 # "objective": "reg:squarederror",
@@ -136,12 +137,12 @@ class RaceModel:
                 "eval_metric": "ndcg@25",
                 "ndcg_exp_gain": False,
                 "min_child_weight": 10,
-                "max_depth": 5,
+                "max_depth": 6,
                 "tree_method": "hist",
                 # "max_bin": 3,
                 "early_stopping_rounds": 50,
-                "learning_rate": 0.05,   # ↓↓↓
-                "subsample": 0.8,
+                "learning_rate": 0.1,   # ↓↓↓
+                "subsample": 0.5,
             },
             callbacks=[PrintIterationCallback()], #If you want training progress plotted
         )
@@ -205,11 +206,11 @@ class RaceModel:
             )
 
             race_features = race_stats.select(self.race_features).to_numpy()[0].astype(np.float32, copy=False)
-            race_embeddings = race_stats.select(self.embed_features).to_numpy()[0].astype(np.float32, copy=False)
+            # race_embeddings = race_stats.select(self.embed_features).to_numpy()[0].astype(np.float32, copy=False)
             race_features = np.tile(race_features, (len(riders_features), 1))
-            race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
-            embedding_diff = np.abs(rider_embeddings - race_embeddings)
-            race_X = np.hstack([riders_features, embedding_diff, race_features])
+            # race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
+            # embedding_diff = np.abs(rider_embeddings - race_embeddings)
+            race_X = np.hstack([riders_features, race_features])#, embedding_diff])
             if race_year < 2024:
                 X_train.append(race_X)
                 y_train.append(ranks_to_predict)
@@ -478,6 +479,7 @@ def train():
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
 
+
     riders_yearly_data = riders_yearly_data.with_columns(
         pl.all().replace(-1, 0)
     )
@@ -571,7 +573,7 @@ def evaluate():
     # print(actual_result)
 
 def main():
-    # train()
+    train()
     evaluate()
 
 if __name__ == "__main__":
