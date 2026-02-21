@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 import json
 import xgboost as xgb
-from typing import Tuple
+from typing import Tuple, Dict
 from sklearn.metrics import (
     confusion_matrix,
     classification_report,
@@ -25,6 +25,7 @@ import numpy as np
 
 with open("WIELERMANAGER_RULES.json") as f:
     rules = json.load(f)
+
 
 class RaceModel:
     """
@@ -91,12 +92,19 @@ class RaceModel:
             "startlist_score", #Check present in pairs
         ] + self.embed_features
 
-    def save_model(self) -> None:
-        self.bst.save_model("data_v2/xgboost_model.json")
+    def save_model(self, ndcg: bool = True, binary: bool = True) -> None:
+        if ndcg:
+            self.bst.save_model("data_v2/models/xgboost_model.json")
+        if binary:
+            self.bst_binary.save_model("data_v2/models/xgboost_model_binary_classifier.json")
 
     def load_model(self) -> None:
         self.bst = xgb.Booster()
-        self.bst.load_model("data_v2/xgboost_model.json")
+        self.bst.load_model("data_v2/models/xgboost_model.json")
+        self.bst_binary = xgb.Booster()
+        self.bst_binary.load_model("data_v2/models/xgboost_model_binary_classifier.json")
+
+# region training models
         
     def fit(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray, train_groups: np.ndarray, test_groups: np.ndarray) -> None:
 
@@ -137,11 +145,11 @@ class RaceModel:
                 "eval_metric": "ndcg@25",
                 "ndcg_exp_gain": False,
                 "min_child_weight": 10,
-                "max_depth": 6,
+                "max_depth": 4,
                 "tree_method": "hist",
                 # "max_bin": 3,
                 "early_stopping_rounds": 50,
-                "learning_rate": 0.1,   # ↓↓↓
+                "learning_rate": 0.05,   # ↓↓↓
                 "subsample": 0.5,
             },
             callbacks=[PrintIterationCallback()], #If you want training progress plotted
@@ -149,6 +157,79 @@ class RaceModel:
         self.bst = bst
 
         self.print_training_progress(epochs = epochs, test_errors = test_errors, train_errors = train_errors)
+        return
+
+    def fit_binary(self, X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray) -> None:
+        """
+        Fit binary classifier for top-25 prediction.
+        
+        Args:
+            X_train, y_train: Training data and binary labels (0/1)
+            X_test, y_test: Test data and binary labels (0/1)
+        """
+        # Calculate scale_pos_weight to handle class imbalance
+        n_negative = np.sum(y_train == 0)
+        n_positive = np.sum(y_train == 1)
+        scale_pos_weight = n_negative / n_positive if n_positive > 0 else 1.0
+        
+        print(f"Binary classification data: {len(y_train)} training samples")
+        print(f"  - negative (not top-25): {n_negative} ({100*n_negative/len(y_train):.1f}%)")
+        print(f"  - positive (top-25): {n_positive} ({100*n_positive/len(y_train):.1f}%)")
+        print(f"  - scale_pos_weight: {scale_pos_weight:.2f}")
+
+        dtrain = xgb.DMatrix(X_train, label=y_train)
+        dtest = xgb.DMatrix(X_test, label=y_test)
+        del X_train, X_test
+
+        epochs = []
+        test_errors = []
+        train_errors = []
+        
+        class PrintIterationCallback(xgb.callback.TrainingCallback):
+            def after_iteration(xgb_self, model, epoch, evals_log):
+                if epoch % 50 == 0:
+                    test_y_pred = model.predict(dtest)
+                    train_y_pred = model.predict(dtrain)
+
+                    test_auc = self.compute_auc(y_test, test_y_pred)
+                    train_auc = self.compute_auc(y_train, train_y_pred)
+                    epochs.append(epoch)
+                    test_errors.append(test_auc)
+                    train_errors.append(train_auc)
+                
+                return False
+            
+        bst_binary = xgb.train(
+            dtrain=dtrain,
+            num_boost_round=1001,
+            evals=[(dtrain, "train"), (dtest, "test")],
+            params={
+                "objective": "binary:logistic",
+                "eval_metric": "logloss",
+                "scale_pos_weight": scale_pos_weight,
+                "min_child_weight": 10,
+                "max_depth": 4,
+                "tree_method": "hist",
+                "early_stopping_rounds": 50,
+                "learning_rate": 0.05,
+                "subsample": 0.5,
+            },
+            callbacks=[PrintIterationCallback()],
+        )
+        self.bst_binary = bst_binary
+        self.print_training_progress_binary(epochs=epochs, test_errors=test_errors, train_errors=train_errors)
+        return
+
+    def print_training_progress_binary(self, epochs, test_errors, train_errors):
+        plt.figure(figsize=(10, 6))
+        plt.plot(epochs, test_errors, label='Test AUC', color='blue')
+        plt.plot(epochs, train_errors, label='Train AUC', color='orange')
+        plt.xlabel('Epochs')
+        plt.ylabel('AUC')
+        plt.title('Binary Classifier Training Progress')
+        plt.legend()
+        plt.grid()
+        plt.show()
         return
 
     def print_training_progress(self, epochs, test_errors, train_errors):
@@ -220,20 +301,28 @@ class RaceModel:
                 y_test.append(ranks_to_predict)
                 test_groups.append(len(riders_features))
 
-        y_train = np.concatenate(y_train)
+        y_train_raw = np.concatenate(y_train)
         X_train = np.vstack(X_train)
-        y_test = np.concatenate(y_test)
+        y_test_raw = np.concatenate(y_test)
         X_test = np.vstack(X_test)
 
-        if any(y_test < 0) or any(y_train < 0):
+        if any(y_test_raw < 0) or any(y_train_raw < 0):
             breakpoint()
             raise ValueError("Negative values found in ranks_to_predict, expected non-negative ranks")
-        y_train = np.where(y_train <= 30, 1.0 / np.log2(y_train + 1), 0.0)
-        y_test = np.where(y_test <= 30, 1.0 / np.log2(y_test + 1), 0.0)
-        print(f"training on {len(y_train)} pairs")
-        print(f"testing on {len(y_test)} pairs")
+        
+        # NDCG@25 targets (for ranking model)
+        y_train_ndcg = np.where(y_train_raw <= 30, 1.0 / np.log2(y_train_raw + 1), 0.0)
+        y_test_ndcg = np.where(y_test_raw <= 30, 1.0 / np.log2(y_test_raw + 1), 0.0)
+        
+        # Binary targets (for classification model): top-25 = 1, else = 0
+        y_train_binary = np.where(y_train_raw <= 25, 1.0, 0.0).astype(np.float32)
+        y_test_binary = np.where(y_test_raw <= 25, 1.0, 0.0).astype(np.float32)
+        
+        print(f"training on {len(y_train_ndcg)} pairs")
+        print(f"testing on {len(y_test_ndcg)} pairs")
+        print(f"  - positive samples (top-25): train={np.sum(y_train_binary):.0f}, test={np.sum(y_test_binary):.0f}")
 
-        return X_train, y_train, train_groups, X_test, y_test, test_groups
+        return X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups
     
     def get_rider_feats(
         self, 
@@ -370,6 +459,7 @@ class RaceModel:
         test_groups = groups[groups_split_index:]
         return X_train, y_train, train_groups, X_test, y_test, test_groups 
 
+# region evaluation 
 
     def mean_ndcg(self,y_test, y_pred, test_groups) -> float:
         start = 0
@@ -391,6 +481,13 @@ class RaceModel:
             ndcg_scores.append(ndcg)
             start = end
         return np.mean(ndcg_scores)
+
+    def compute_auc(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """Compute ROC-AUC score for binary classification."""
+        from sklearn.metrics import roc_auc_score
+        if len(np.unique(y_true)) < 2:
+            return 0.0  # Cannot compute AUC with only one class
+        return roc_auc_score(y_true, y_pred)
 
     def precision_ndcg(self,y_test, y_pred, test_groups):
         precision_scores = []
@@ -433,7 +530,7 @@ class RaceModel:
 
         print("Mean Recall@25:", np.mean(recall_scores))
 
-    def evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray, test_groups: np.ndarray) -> None:
+    def evaluate_ndcg(self, X_test: np.ndarray, y_test: np.ndarray, test_groups: np.ndarray) -> None:
         dtest = xgb.DMatrix(X_test, label=y_test, group=test_groups)
         y_pred = self.bst.predict(dtest)
         
@@ -447,32 +544,134 @@ class RaceModel:
         self.precision_ndcg(y_test, y_pred, test_groups)
         self.recall_ndcg(y_test, y_pred, test_groups)
 
+
+    def evaluate_binary(self, X_test: np.ndarray, y_test: np.ndarray) -> None:
+        """
+        Evaluate binary classifier for top-25 prediction.
+        
+        Args:
+            X_test, y_test: Test data and binary labels
+        """
+        from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
+        
+        dtest = xgb.DMatrix(X_test, label=y_test)
+        y_pred = self.bst_binary.predict(dtest)
+        
+        # Compute metrics at default threshold (0.5)
+        y_pred_binary = (y_pred >= 0.5).astype(int)
+        
+        auc = roc_auc_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred_binary, zero_division=0)
+        recall = recall_score(y_test, y_pred_binary, zero_division=0)
+        f1 = f1_score(y_test, y_pred_binary, zero_division=0)
+        
+        print("\n--- Binary Classifier Evaluation ---")
+        print(f"ROC-AUC:  {auc:.4f}")
+        print(f"Precision (threshold=0.5): {precision:.4f}")
+        print(f"Recall (threshold=0.5):    {recall:.4f}")
+        print(f"F1-Score (threshold=0.5):  {f1:.4f}")
+        
+        # Compute precision/recall at different thresholds
+        from sklearn.metrics import precision_recall_curve
+        precisions, recalls, thresholds = precision_recall_curve(y_test, y_pred)
+        
+        print("\nPrecision-Recall at various thresholds:")
+        for thresh in [0.3, 0.4, 0.5, 0.6, 0.7]:
+            idx = np.argmin(np.abs(thresholds - thresh))
+            print(f"  threshold={thresh:.1f}: precision={precisions[idx]:.4f}, recall={recalls[idx]:.4f}")
+
+    def predict_ensemble(
+        self,
+        result_features_df: pl.DataFrame,
+        riders_yearly_data: pl.DataFrame,
+        races_features_df: pl.DataFrame,
+    ) -> Dict:
+        """
+        Generate predictions using both models (ranking and classification).
+        
+        Returns separate outputs:
+        - ranking_scores: NDCG-based scores from ranking model
+        - top25_probabilities: Probability of finishing top-25 from binary classifier
+        
+        Args:
+            result_features_df: Rider result features
+            riders_yearly_data: Historical rider data
+            races_features_df: Race features
+            race_id: Optional specific race ID to predict on (if None, predicts all races)
+        
+        Returns:
+            Dict with keys:
+                - 'race_ids': List of race IDs
+                - 'rider_names': List of rider names  
+                - 'ranking_scores': Scores from ranking model (for ordering)
+                - 'top25_probabilities': Probabilities from binary classifier
+        """
+        # Get feature matrices (reuse existing format)
+        X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups = self.to_xgboost_format(
+            result_features_df=result_features_df,
+            riders_yearly_data=riders_yearly_data,
+            races_features_df=races_features_df
+        )
+        
+        # Get predictions from ranking model
+        dtest_rank = xgb.DMatrix(X_test)
+        ranking_scores = self.bst.predict(dtest_rank)
+        
+        # Get predictions from binary classifier
+        dtest_binary = xgb.DMatrix(X_test)
+        top25_probabilities = self.bst_binary.predict(dtest_binary)
+        
+        return {
+            'ranking_scores': ranking_scores,
+            'top25_probabilities': top25_probabilities,
+            'y_true_ndcg': y_test_ndcg,
+            'y_true_binary': y_test_binary,
+            'test_groups': test_groups
+        }
+
     def train_model(
             self, 
             result_features_df: pl.DataFrame, 
             riders_yearly_data: pl.DataFrame,
-            races_features_df: pl.DataFrame
+            races_features_df: pl.DataFrame,
+            train_ndcg: bool = False,
+            train_binary: bool = False
         ) -> None:
-        X_train, y_train, train_groups, X_test, y_test, test_groups = self.to_xgboost_format(
+        """Train both ranking and binary classification models."""
+        X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups = self.to_xgboost_format(
             result_features_df=result_features_df, 
             riders_yearly_data=riders_yearly_data, 
-            races_features_df = races_features_df 
+            races_features_df=races_features_df 
         )
-        # X_train, y_train, train_groups, X_test, y_test, test_groups = self.split_train_test(X, y, groups)
-        print("Starting model fit")
-        self.fit(
-            X_train, 
-            y_train, 
-            X_test, 
-            y_test, 
-            train_groups, 
-            test_groups,
-        )
-        print("Model fitted")
+        
+        # Train ranking model (NDCG@25)
+        print("\n=== Training Ranking Model (NDCG@25) ===")
+        if train_ndcg:
+            self.fit(
+                X_train, 
+                y_train_ndcg, 
+                X_test, 
+                y_test_ndcg, 
+                train_groups, 
+                test_groups,
+            )
+            print("Ranking model fitted")
+        
+        # Train binary classifier (Top-25 prediction)
+        if train_binary:
+            print("\n=== Training Binary Classifier (Top-25) ===")
+            self.fit_binary(
+                X_train,
+                y_train_binary,
+                X_test,
+                y_test_binary
+            )
+            print("Binary classifier fitted")
 
-
-
-def train():
+def train(
+    train_ndcg: bool = False,
+    train_binary: bool = False
+):
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
@@ -502,8 +701,14 @@ def train():
     model.train_model(
         result_features_df=results_features, 
         riders_yearly_data=riders_yearly_data, 
-        races_features_df=races_features)
-    model.save_model()
+        races_features_df=races_features,
+        train_ndcg=train_ndcg,
+        train_binary=train_binary
+    )
+    model.save_model(
+        ndcg = train_ndcg,
+        binary = train_binary
+    )
 
 
 def evaluate():
@@ -532,14 +737,15 @@ def evaluate():
     model.load_model()
 
     """Evaluate model"""
-    X_train, y_train, train_groups, X_test, y_test, test_groups  = model.to_xgboost_format(
+    X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups = model.to_xgboost_format(
         result_features_df=results_features, 
         riders_yearly_data=riders_yearly_data, 
         races_features_df = races_features,
     )
     # X_train, y_train, train_weights, X_test, y_test, test_weights = model.split_train_test(X, y, x_weights)
 
-    model.evaluate_model(X_test, y_test, test_groups=test_groups)
+    model.evaluate_ndcg(X_test, y_test_ndcg, test_groups=test_groups)
+    model.evaluate_binary(X_test, y_test_binary)
 
     print("Model evaluated")
 
@@ -572,9 +778,121 @@ def evaluate():
     #     .select("name", "rank").head(10)
     # print(actual_result)
 
+# region minimize logloss 
+import numpy as np
+from scipy.optimize import minimize
+from sklearn.metrics import log_loss
+
+def minimize_logloss():
+    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
+    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    
+    riders_yearly_data = riders_yearly_data.with_columns(
+        pl.all().replace(-1, 0)
+    )
+    necessary_races, necessary_results = filter_data(races_df, result_features_df)
+
+    results_features = results_embedded_df.join(
+        necessary_results,
+        on = ["race_id", "name"],
+        how="left"
+    )
+    races_features = races_embedded_df.join(
+        necessary_races,
+        on = ["race_id"],
+        how="left"
+    )
+    model = RaceModel()
+    model.load_model()
+
+    """Evaluate model"""
+    X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups = model.to_xgboost_format(
+        result_features_df=results_features, 
+        riders_yearly_data=riders_yearly_data, 
+        races_features_df = races_features,
+    )
+    ensemble_prediction = model.predict_ensemble(
+        result_features_df=results_features, 
+        riders_yearly_data=riders_yearly_data,
+        races_features_df=races_features
+    )
+    # Extract arrays from the result
+    scores1 = np.array(ensemble_prediction['ranking_scores'])
+    scores2 = np.array(ensemble_prediction['top25_probabilities'])
+    print("Correlation between scores1 and scores2:", np.corrcoef(scores1, scores2)[0,1])
+    y_true_rank = np.array(results_features.select('rank').to_numpy().flatten())
+    test_groups = ensemble_prediction['test_groups']
+    points_mapping = rules['points_per_race']['World Tour']
+    result = optimize_weighted_points(scores1, scores2, y_true_rank, test_groups, points_mapping)
+    print(f"Optimal weights: w1={result['w1']:.4f}, w2={result['w2']:.4f}, max points={result['max_points']:.2f}")
+    return result
+  
+
+
+def optimize_weighted_points(scores1, scores2, y_true_rank, test_groups, points_mapping):
+    """
+    Finds optimal weights for combining two model scores to maximize points based on min(predicted_rank, actual_rank).
+    Args:
+        scores1: np.array, scores from model 1
+        scores2: np.array, scores from model 2
+        y_true_rank: np.array, actual ranks for each rider (1-based)
+        test_groups: list of group sizes
+        points_mapping: dict mapping rank (as string) to points
+    Returns:
+        dict: {'w1': optimal weight for model 1, 'w2': optimal weight for model 2, 'max_points': max points}
+    """
+    def weighted_points(w1, w2):
+        combined_score = w1 * scores1 + w2 * scores2
+        start = 0
+        total_points = 0
+        max_rank = 0
+        average_rank_distance = 0
+        for group_idx, group_size in enumerate(test_groups):
+            end = start + group_size
+            group_scores = combined_score[start:end]
+            group_true_ranks = y_true_rank[start:end]
+            pred_order = np.argsort(-group_scores)  # descending order
+            predicted_ranks = np.empty_like(pred_order)
+            predicted_ranks[pred_order] = np.arange(1, group_size + 1)
+            average_rank_distance_partial = 0
+            for i in range(group_size):
+                min_rank = int(max(predicted_ranks[i], group_true_ranks[i]))
+                if min_rank <= 25:
+                    signed_rank_distance = predicted_ranks[i] - group_true_ranks[i]
+                    average_rank_distance_partial += signed_rank_distance
+
+                points = math.log(points_mapping.get(str(min_rank), 0) + 1)
+                total_points += points
+                max_rank += math.log(points_mapping.get(str(group_true_ranks[i]), 0) + 1)
+            average_rank_distance += average_rank_distance_partial / group_size
+            start = end
+        print(f"average_rank_distance: {average_rank_distance}, total_points: {total_points}")
+        return total_points
+
+    # Grid search
+    grid = np.linspace(0.01, 1, 11)  # 0.01, 0.11, ..., 1.0
+    results = []
+    print("w1\tw2\tmax_points")
+    for w1 in grid:
+        for w2 in grid:
+            max_points = weighted_points(w1, w2)
+            results.append((w1, w2, max_points))
+            print(f"{w1:.2f}\t{w2:.2f}\t{max_points}")
+    # Find best
+    best = max(results, key=lambda x: x[2])
+    return {'w1': best[0], 'w2': best[1], 'max_points': best[2]}
+    # return {'w1': w1, 'w2': w2, 'max_points': max_points}
+
 def main():
-    train()
+    train(
+        train_ndcg=True,
+        train_binary=True
+    )
     evaluate()
+    minimize_logloss()
 
 if __name__ == "__main__":
     main()

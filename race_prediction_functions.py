@@ -393,13 +393,13 @@ def new_race_to_xgboost_format(
     # ).select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
 
     race_features = new_race_features.select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
-    race_embeddings = new_race_features.select(mock_model.embed_features).to_numpy()[0].astype(np.float32, copy=False)
+    # race_embeddings = new_race_features.select(mock_model.embed_features).to_numpy()[0].astype(np.float32, copy=False)
     race_features = np.tile(race_features, (len(riders_features), 1))
-    race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
+    # race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
             
-    embedding_diff = np.abs(rider_embeddings - race_embeddings)
+    # embedding_diff = np.abs(rider_embeddings - race_embeddings)
 
-    race_X = np.hstack([riders_features, embedding_diff, race_features])
+    race_X = np.hstack([riders_features, race_features]) #, embedding_dff])
 
     return race_X
 

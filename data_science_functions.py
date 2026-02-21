@@ -622,6 +622,7 @@ def calculate_cosine_similarity_polars(df, n_dims=EMBEDDING_SIZE):
     norm1 = pl.sum_horizontal([c ** 2 for c in left_cols]).sqrt()
     norm2 = pl.sum_horizontal([c ** 2 for c in right_cols]).sqrt()
     cosine_sim = dot_product / (norm1 * norm2)
+    
 
     # L1 distance
     l1_distance = pl.sum_horizontal([ (l - r).abs() for l, r in zip(left_cols, right_cols) ])
@@ -825,7 +826,7 @@ def filter_data(races_df: pl.DataFrame, results_df: pl.DataFrame) -> tuple[pl.Da
      """
     necessary_races = races_df.filter(
         pl.col("startlist_score") > 200
-    )#.filter(pl.col("stage").is_null())
+    ).filter(pl.col("stage").is_null())
     necessary_results = results_df.join(
         necessary_races.select("race_id"),
         on = "race_id",

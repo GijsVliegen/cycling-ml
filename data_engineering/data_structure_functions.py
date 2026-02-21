@@ -517,8 +517,8 @@ def create_new_race_data(race_name_stages: tuple[str, int]):
         )
         logs.append(race_logs)
         startlist_df = pl.DataFrame(startlist)
-        startlist_df.write_parquet(f"data_v2/startlist_{race}.parquet")
-        race_df.write_parquet(f"data_v2/new_race_stats_{race}.parquet")
+        startlist_df.write_parquet(f"data_v2/wielermanager/startlist_{race}.parquet")
+        race_df.write_parquet(f"data_v2/wielermanager/new_race_stats_{race}.parquet")
     return logs
 
 def main_new():
@@ -536,15 +536,15 @@ def main():
     # fetch_year_race_urls(2022)
     # fetch_year_race_urls(2021) #still needs to happen for 2.1 rraces
 
-    # for i in range(2013, 2026):
-    #     fetch_year_race_urls(i)
-    # downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
-    # for i in range(2013, 2026):
-    #     more_logs = download_year_races(i, downloaded_races)
-    #     logs += more_logs
+    for i in range(2005, 2013):
+        fetch_year_race_urls(i)
+    downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
+    for i in range(2005, 2013):
+        more_logs = download_year_races(i, downloaded_races)
+        logs += more_logs
 
-    # more_logs = make_races_results_df()
-    # logs += more_logs
+    more_logs = make_races_results_df()
+    logs += more_logs
     
     # more_logs = download_rider_pages()
     # logs += more_logs
