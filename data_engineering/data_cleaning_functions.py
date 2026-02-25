@@ -27,6 +27,7 @@ def filter_stats(stats: dict, race_url) -> dict:
     # Generate race_id: Hash of date+classification
     # race_id = "R" + hashlib.md5(f"{date_str}_{classification}".encode()).hexdigest()[:8]
 
+
     return {
         # "race_id": race_id,
         "race_id": "R" + hashlib.md5(f"{stats.get("name")}_{stats.get("year")}_{stats.get("stage")}".encode()).hexdigest()[:8],
@@ -35,13 +36,13 @@ def filter_stats(stats: dict, race_url) -> dict:
         "year": stats.get("year"),
         "stage": stats.get("stage"),
         "classification": classification,
-        "final_km_percentage": float(stats.get("final_km_percentage", "-1%")[:-1]),
+        "final_km_percentage": float(stats.get("final_km_percentage", "-1%")[:-1]) if stats.get("final_km_percentage") != "" else -1 ,
         "distance_km": stats.get("distance") if stats.get("distance") else "-1",
         "elevation_m": stats.get("heigh_meters") if stats.get("heigh_meters") else "-1",
         "avg_speed_kmh": stats.get("speed").replace(" km/h", "") if stats.get("speed") else "-1",
         "startlist_score": stats.get("startlist_score").split(" ")[1][1:-1] if " " in stats.get("startlist_score") else stats.get("startlist_score"), #in case of stage races, take current startlist score for that stage
         "won_how": stats.get("won_how"),
-        "temp": stats.get("temp").replace(" °C", "") or "-1", #lets hope this is not a possible value
+        "temp": stats.get("temp").replace(" °C", "") if stats.get("temp") else "-1", #lets hope this is not a possible value
         "profile_score": stats.get("profile_score"),
         "profile_score_last_25k": stats.get("profile_score_last_25k"),
     }

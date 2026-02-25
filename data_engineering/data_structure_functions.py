@@ -1,24 +1,46 @@
 
 import polars as pl
-from data_engineering.data_cleaning_functions import filter_results, filter_stats
-from data_engineering.soup_parsing_functions import (
-    get_race_profile_url,
-    parse_calendar_page,
-    parse_gc_page,
-    parse_race_page,
-    parse_race_profile_page,
-    parse_race_result_page,
-    parse_rider_page,
-    parse_rider_statistics_page,
-    parse_startlist_page
-)
 
-from data_engineering.selenium_webscraping import (
-    load_soup_from_file, 
-    download_page,
-    load_soups_from_http, 
-    url_to_filename
-)
+try:
+    # Try imports for when running from root directory
+    from data_engineering.data_cleaning_functions import filter_results, filter_stats
+    from data_engineering.soup_parsing_functions import (
+        get_race_profile_url,
+        parse_calendar_page,
+        parse_gc_page,
+        parse_race_page,
+        parse_race_profile_page,
+        parse_race_result_page,
+        parse_rider_page,
+        parse_rider_statistics_page,
+        parse_startlist_page
+    )
+    from data_engineering.selenium_webscraping import (
+        load_soup_from_file, 
+        download_page,
+        load_soups_from_http, 
+        url_to_filename
+    )
+except ImportError:
+    # Fall back to local imports for when running from data_engineering/ directory
+    from data_cleaning_functions import filter_results, filter_stats
+    from soup_parsing_functions import (
+        get_race_profile_url,
+        parse_calendar_page,
+        parse_gc_page,
+        parse_race_page,
+        parse_race_profile_page,
+        parse_race_result_page,
+        parse_rider_page,
+        parse_rider_statistics_page,
+        parse_startlist_page
+    )
+    from selenium_webscraping import (
+        load_soup_from_file, 
+        download_page,
+        load_soups_from_http, 
+        url_to_filename
+    )
 
 
 BASE_URL = "https://www.procyclingstats.com"
@@ -92,8 +114,8 @@ def fetch_year_race_urls(year: int) -> list[str]:
         "1.UWT",
         "2.UWT",
         "1.Pro",
-        "2.1",
-        "2.Pro",
+        # "2.1",
+        # "2.Pro",
         "1.1", #GP samyn is 1.1
     ]
     all_race_urls = []
@@ -258,8 +280,9 @@ def parse_riders_to_polars() -> tuple[pl.DataFrame, pl.DataFrame]:
             log_messages.append(f"exception for loading rider file {rider_url}: {e}")
             continue
         try:
-            rider_stats = parse_rider_page(rider_soup)
+            rider_stats, team_name = parse_rider_page(rider_soup)
             rider_stats["name"] = rider
+            rider_stats["team_name"] = team_name
             all_rider_stats.append(rider_stats)
         except Exception as e:
             log_messages.append(f"exception for parsing rider page {rider_url}: {e}")
@@ -439,7 +462,7 @@ def make_races_results_df():
         (race["name"], race["year"]) 
         for race in current_races_df.select(["name", "year"]).unique().to_dicts()
     ]
-    year_range = range(2013, 2026)
+    year_range = range(2005, 2014)
     logs = []
     for year in year_range:
         races_df, results_df, parse_logs = parse_races_to_polars(
@@ -511,7 +534,7 @@ def create_new_race_data(race_name_stages: tuple[str, int]):
     all_startlists = []
     logs = []
     for soup, (race, stage, race_type) in zip(startlist_soups, race_name_stages):
-        startlist = parse_startlist_page(soup)
+        startlist, team_list = parse_startlist_page(soup)
         race_df, race_logs = parse_new_races_to_dict(
             races = race_name_stages
         )
@@ -536,22 +559,22 @@ def main():
     # fetch_year_race_urls(2022)
     # fetch_year_race_urls(2021) #still needs to happen for 2.1 rraces
 
-    for i in range(2005, 2013):
-        fetch_year_race_urls(i)
-    downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
-    for i in range(2005, 2013):
-        more_logs = download_year_races(i, downloaded_races)
-        logs += more_logs
+    # for i in range(2005, 2013):
+    #     fetch_year_race_urls(i)
+    # downloaded_races = pl.read_parquet("data_v2/races_df.parquet")
+    # for i in range(2005, 2013):
+    #     more_logs = download_year_races(i, downloaded_races)
+    #     logs += more_logs
 
     more_logs = make_races_results_df()
     logs += more_logs
     
     # more_logs = download_rider_pages()
     # logs += more_logs
-    # more_logs = make_riders_stats_df()
-    # logs += more_logs
+    more_logs = make_riders_stats_df()
+    logs += more_logs
 
-    logs = main_new()
+    # logs = main_new()
 
     with open(f"logs.txt", "w") as f:
         f.write("\n".join(logs))

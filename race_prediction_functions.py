@@ -14,11 +14,11 @@ from xgboost_functions import RaceModel
 
 def get_new_race_embedding(
     race_to_find_for: pl.DataFrame, 
-    old_embeddings: pl.DataFrame, 
+    base_embeddings: pl.DataFrame, 
     old_races: pl.DataFrame
 ) -> pl.DataFrame:
     """
-    closest 5 races in the same (stage-)race over last 5 years
+    closest 8 races in the same (stage-)race over last 8 years
 
     This function is total overkill since it can act on find for multiple races at once. 
     """
@@ -26,7 +26,7 @@ def get_new_race_embedding(
         old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
         on = ["name"]
     ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 8
     ).filter(
         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
     ).filter(
@@ -65,9 +65,9 @@ def get_new_race_embedding(
     )
     closest_race_ids = duplicate_races_distance.sort(
         "total_distance", descending=False
-    ).group_by("race_id").head(5).select("race_id", "race_id_right")
+    ).group_by("race_id").head(8).select("race_id", "race_id_right")
     closest_embedding = closest_race_ids.join(
-        old_embeddings.rename({"race_id": "race_id_right"}),
+        base_embeddings.rename({"race_id": "race_id_right"}),
         on="race_id_right",
         how="left"
     ).group_by(
@@ -75,7 +75,7 @@ def get_new_race_embedding(
     ).agg(
         *[
             pl.col(c).mean()
-            for c in old_embeddings.columns if c != "race_id"
+            for c in base_embeddings.columns if c != "race_id"
         ]
     )
     return closest_embedding
@@ -155,77 +155,77 @@ def get_new_race_features(old_races_features: pl.DataFrame, race_to_find_for: pl
     return race_type_stats
 
 
-def get_new_race_embedding(
-    race_to_find_for: pl.DataFrame, 
-    old_embeddings: pl.DataFrame, 
-    old_races: pl.DataFrame
-) -> pl.DataFrame:
-    """
-    closest 5 races in the same (stage-)race over last 5 years
+# def get_new_race_embedding(
+#     race_to_find_for: pl.DataFrame, 
+#     old_embeddings: pl.DataFrame, 
+#     old_races: pl.DataFrame
+# ) -> pl.DataFrame:
+#     """
+#     closest 5 races in the same (stage-)race over last 5 years
 
-    This function is total overkill since it can act on find for multiple races at once. 
-    """
-    duplicate_races = race_to_find_for.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
-        old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
-        on = ["name"]
-    ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
-    ).filter(
-        pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
-    ).filter(
-        ~ (pl.col("race_id") == pl.col("race_id_right"))
-    )
-    if len(duplicate_races) < 5:
-        breakpoint()
-        print(f"Warning: only {len(duplicate_races)} similar races found for race \
-              {race_to_find_for.select('name').to_numpy()[0][0]}")
-    #TODO years should be replaced by dates, so only earlier stages are taken
-    # not critical tho
-    duplicate_races_normalized = duplicate_races.with_columns(
-        *[
-            (
-                (pl.col(c) - pl.col(f"{c}_right").min()) 
-                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
-            ).over("name").alias(f"{c}_normalised")
-            for c in RACE_SIMILARITY_COLS
-        ],
-        *[
-            (
-                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
-                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
-            ).over("name").alias(f"{c}_normalised_right")
-            for c in RACE_SIMILARITY_COLS
-        ]
-    )
-    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
-        (
-            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
-        ).alias(f"{c}_distance")
-        for c in RACE_SIMILARITY_COLS
-    ])
-    duplicate_races_distance = duplicate_races_distance_part.with_columns(
-        (pl.sum_horizontal([
-            pl.col(f"{c}_distance") 
-            for c in RACE_SIMILARITY_COLS
-        ])
-        ).sqrt().alias("total_distance")
-    )
-    closest_race_ids = duplicate_races_distance.sort(
-        "total_distance", descending=False
-    ).group_by("race_id").head(5).select("race_id", "race_id_right")
-    closest_embedding = closest_race_ids.join(
-        old_embeddings.rename({"race_id": "race_id_right"}),
-        on="race_id_right",
-        how="left"
-    ).group_by(
-        "race_id",
-    ).agg(
-        *[
-            pl.col(c).mean()
-            for c in old_embeddings.columns if c != "race_id"
-        ]
-    )
-    return closest_embedding
+#     This function is total overkill since it can act on find for multiple races at once. 
+#     """
+#     duplicate_races = race_to_find_for.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+#         old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
+#         on = ["name"]
+#     ).filter(
+#         pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 5
+#     ).filter(
+#         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
+#     ).filter(
+#         ~ (pl.col("race_id") == pl.col("race_id_right"))
+#     )
+#     if len(duplicate_races) < 5:
+#         breakpoint()
+#         print(f"Warning: only {len(duplicate_races)} similar races found for race \
+#               {race_to_find_for.select('name').to_numpy()[0][0]}")
+#     #TODO years should be replaced by dates, so only earlier stages are taken
+#     # not critical tho
+#     duplicate_races_normalized = duplicate_races.with_columns(
+#         *[
+#             (
+#                 (pl.col(c) - pl.col(f"{c}_right").min()) 
+#                 / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+#             ).over("name").alias(f"{c}_normalised")
+#             for c in RACE_SIMILARITY_COLS
+#         ],
+#         *[
+#             (
+#                 (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+#                 / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+#             ).over("name").alias(f"{c}_normalised_right")
+#             for c in RACE_SIMILARITY_COLS
+#         ]
+#     )
+#     duplicate_races_distance_part = duplicate_races_normalized.with_columns([
+#         (
+#             (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
+#         ).alias(f"{c}_distance")
+#         for c in RACE_SIMILARITY_COLS
+#     ])
+#     duplicate_races_distance = duplicate_races_distance_part.with_columns(
+#         (pl.sum_horizontal([
+#             pl.col(f"{c}_distance") 
+#             for c in RACE_SIMILARITY_COLS
+#         ])
+#         ).sqrt().alias("total_distance")
+#     )
+#     closest_race_ids = duplicate_races_distance.sort(
+#         "total_distance", descending=False
+#     ).group_by("race_id").head(5).select("race_id", "race_id_right")
+#     closest_embedding = closest_race_ids.join(
+#         old_embeddings.rename({"race_id": "race_id_right"}),
+#         on="race_id_right",
+#         how="left"
+#     ).group_by(
+#         "race_id",
+#     ).agg(
+#         *[
+#             pl.col(c).mean()
+#             for c in old_embeddings.columns if c != "race_id"
+#         ]
+#     )
+#     return closest_embedding
 
 def get_rider_features(
         new_race: pl.DataFrame,
@@ -411,18 +411,22 @@ def predict_race(startlist_df, race_stats_df):
     results_df = pl.read_parquet("data_v2/results_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     
-    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    races_base_embedded_df = pl.read_parquet("data_v2/races_base_embedded_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     """Prepare data of race and riders to give to xgboost"""
     
     riders_yearly_data = riders_yearly_data.with_columns(
         pl.all().replace(-1, 0)
     )
-    necessary_races, necessary_results = filter_data(races_df, results_df)
+    necessary_races, necessary_results = filter_data(races_df, results_df, feature_creation=True)
 
+    if len(
+        race_stats_df.filter(pl.col("name") == "classic-brugge-de-panne")
+    ) == 1:
+        "inspect embedding since it doensnt predict spinners AT ALL for this"
     race_embedding = get_new_race_embedding(
         race_to_find_for = race_stats_df,
-        old_embeddings = races_embedded_df,
+        base_embeddings = races_base_embedded_df,
         old_races = necessary_races,
     )
     race_feats = race_embedding.join(
@@ -499,12 +503,6 @@ def predict_race(startlist_df, race_stats_df):
 def main():
     startlist_df = pl.read_parquet("data_v2/new_race_startlist.parquet")
     race_stats_df = pl.read_parquet("data_v2/new_race_stats.parquet")
-    # races_df = pl.read_parquet("data_v2/races_df.parquet")
-    # results_df = pl.read_parquet("data_v2/results_df.parquet")
-    # riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-    # races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
-    # results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    # necessary_races, necessary_results = filter_data(races_df, results_df)
     """Prepare data of race and riders to give to xgboost"""
     predict_race(
         startlist_df = startlist_df,

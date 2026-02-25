@@ -502,7 +502,6 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         "uci_pts",
         "pcs_pts",
         "name_right",
-        "year",
         "stage",
         "classification",
         "distance_km",
@@ -523,7 +522,8 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         how = "left"
     ).select(
         "name",
-        "date"
+        "date",
+        "year"
     ).filter(pl.col("date").is_not_null()).unique()
     for label, _ in windows.items():
 
@@ -558,7 +558,7 @@ def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.Data
     #create embeddings from pre-embed features
     feature_cols = [
         col for col in pre_embed_features.columns
-        if col not in ["name", "date"]
+        if col not in ["name", "date", "year"]
     ]
     pre_embed_array = pre_embed_features.select(feature_cols).to_numpy()
     pre_embed_array = StandardScaler().fit_transform(pre_embed_array)
@@ -587,7 +587,68 @@ def create_result_embeddings(pre_embed_features: pl.DataFrame, races_df: pl.Data
     )
     return results_embedded_df
 
-def create_races_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl.DataFrame:
+def create_races_inference_embeddings(races_df: pl.DataFrame, base_embeddings_df: pl.DataFrame) -> pl.DataFrame:
+    #create embeddings based on previous races, like it will be done for predicting
+
+
+    duplicate_races = races_df.select("race_id", "name", "year", *RACE_SIMILARITY_COLS).join(
+        races_df.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
+        on = ["name"]
+    ).filter(
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 8
+    ).filter(
+        pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
+    ).filter(
+        ~ (pl.col("race_id") == pl.col("race_id_right"))
+    )
+
+    duplicate_races_normalized = duplicate_races.with_columns(
+        *[
+            (
+                (pl.col(c) - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised")
+            for c in RACE_SIMILARITY_COLS
+        ],
+        *[
+            (
+                (pl.col(f"{c}_right") - pl.col(f"{c}_right").min()) 
+                / (pl.col(f"{c}_right").max() - pl.col(f"{c}_right").min())
+            ).over("name").alias(f"{c}_normalised_right")
+            for c in RACE_SIMILARITY_COLS
+        ]
+    )
+    duplicate_races_distance_part = duplicate_races_normalized.with_columns([
+        (
+            (pl.col(f"{c}_normalised") - pl.col(f"{c}_normalised_right")) ** 2
+        ).alias(f"{c}_distance")
+        for c in RACE_SIMILARITY_COLS
+    ])
+    duplicate_races_distance = duplicate_races_distance_part.with_columns(
+        (pl.sum_horizontal([
+            pl.col(f"{c}_distance") 
+            for c in RACE_SIMILARITY_COLS
+        ])
+        ).sqrt().alias("total_distance")
+    )
+    closest_race_ids = duplicate_races_distance.sort(
+        "total_distance", descending=False
+    ).group_by("race_id").head(8).select("race_id", "race_id_right")
+    closest_embedding = closest_race_ids.join(
+        base_embeddings_df.rename({"race_id": "race_id_right"}),
+        on="race_id_right",
+        how="left"
+    ).group_by(
+        "race_id",
+    ).agg(
+        *[
+            pl.col(c).mean()
+            for c in base_embeddings_df.columns if c != "race_id"
+        ]
+    )
+    return closest_embedding
+
+def create_races_base_embeddings(results_df, results_embedded_df: pl.DataFrame) -> pl.DataFrame:
     #TODO: also average over multiple years?
     results_embedded_df = results_embedded_df.join(
         results_df.select(["name", "race_id", "rank"]).filter(pl.col("rank") < 25),
@@ -661,14 +722,14 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
 
     dfs = []
     results = results.join(
-        races.select(["race_id", pl.col("date").str.to_date(), "startlist_score"]),
+        races.select(["race_id", pl.col("date").str.to_date(), "startlist_score", "year"]),
         on = "race_id",
         how = "left"
     )
     results = results.with_columns(
-        (pl.when(pl.col("rank") <= 3).then(8.333).
+        (pl.when(pl.col("rank") <= 3).then(5.833).
         otherwise(pl.when(
-            pl.col("rank") <= 10).then(2.5)
+            pl.col("rank") <= 10).then(1.5)
             .otherwise(pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
         )) * pl.col("startlist_score")).alias("points"),
     )
@@ -676,7 +737,8 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
         "name",
         "date",
         "rank",
-        "points"
+        "points",
+        "year"
     ]).sort("date")
     lf = bare_results.lazy()
 
@@ -812,21 +874,29 @@ def create_normalized_race_data():
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     necessary_races = races_df.filter(
-        pl.col("startlist_score") > 200
+        pl.col("startlist_score") > 100
     )
     # results_similarity = create_results_similarity(results_df)
     interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
     normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
 
-def filter_data(races_df: pl.DataFrame, results_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+def filter_data(
+        races_df: pl.DataFrame, 
+        results_df: pl.DataFrame,
+        feature_creation: bool = False) -> tuple[pl.DataFrame, pl.DataFrame]:
     """FIlters on
      -> startlist score > 200, to focus on more competitive races
      -> filter on stages? NO!
      """
-    necessary_races = races_df.filter(
-        pl.col("startlist_score") > 200
-    ).filter(pl.col("stage").is_null())
+    if feature_creation:
+        necessary_races = races_df.filter(
+            pl.col("startlist_score") > 100
+        )
+    else:
+        necessary_races = races_df.filter(
+            pl.col("startlist_score") > 200
+        ).filter(pl.col("stage").is_null())
     necessary_results = results_df.join(
         necessary_races.select("race_id"),
         on = "race_id",
@@ -840,7 +910,7 @@ def main():
 
     results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     races_df = pl.read_parquet("data_v2/races_df.parquet")
-    necessary_races, necessary_results = filter_data(races_df, results_df)
+    necessary_races, necessary_results = filter_data(races_df, results_df, feature_creation=True)
 
     normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
     # races_features_df = create_race_features_table(
@@ -856,36 +926,56 @@ def main():
         on = "race_id",
         how = "left"
     )
-    part_results = []
+    feature_part_results = []
+    pre_embed_part_results = []
     for i in range(len(years)-4):
         allowed_years = [str(year) for year in years[i:i+5]]
         part_necessary_races = necessary_races.filter(pl.col("year").is_in(allowed_years))
         part_necessary_results  = necessary_results_with_years.filter(pl.col("year").is_in(allowed_years))
         part_results_features_df = create_result_features_table(
             results=part_necessary_results, 
-            races=part_necessary_races
-        )
-        part_results.append(part_results_features_df)
-    result_features_df = pl.concat(part_results).unique()
+            races=part_necessary_races,
+        ).filter(pl.col("year") == str(years[i+4]))
+        part_pre_embed_features_df = create_result_features_pre_embed(
+            results=part_necessary_results, 
+            races=normalized_races_df
+        ).filter(pl.col("year") == str(years[i+4]))
+        feature_part_results.append(part_results_features_df)
+        pre_embed_part_results.append(part_pre_embed_features_df)
     
+    print(f"Concatenating {len(feature_part_results)} result feature DataFrames")
+    print(f"Concatenating {len(pre_embed_part_results)} pre-embed feature DataFrames")
+    result_features_df = pl.concat(feature_part_results).unique(subset=["name", "race_id"])
+    pre_embed_features_df = pl.concat(pre_embed_part_results).unique(subset=["name", "date", "year"])
     # result_features_df = create_result_features_table(results=necessary_results, races=necessary_races)    
-    pre_embed_features_df = create_result_features_pre_embed(results=necessary_results, races=normalized_races_df)
+    # pre_embed_features_df = create_result_features_pre_embed(
+    #         results=part_necessary_results, 
+    #         races=normalized_races_df
+    #     )
     results_embedded_df = create_result_embeddings(pre_embed_features = pre_embed_features_df, races_df=necessary_races, results_df=necessary_results)
-    races_embedded_df = create_races_embeddings(
+    races_base_embedded_df = create_races_base_embeddings(
         results_df = necessary_results,
-        results_embedded_df = results_embedded_df)
+        results_embedded_df = results_embedded_df
+    )
+    races_inference_embedded_df = create_races_inference_embeddings(
+        races_df = necessary_races,
+        base_embeddings_df= races_base_embedded_df
+    )
+
     results_embedded_df = add_embedding_similarity_to_results_df(
         results_embedded_df=results_embedded_df,
-        races_embedded_df=races_embedded_df,
+        races_embedded_df=races_inference_embedded_df,
     )
     # print(result_features_df.columns)
     # print(len(result_features_df.columns))
     # print(result_features_df)
+    
     pre_embed_features_df.write_parquet("data_v2/pre_embed_features_df.parquet")
     result_features_df.write_parquet("data_v2/result_features_df.parquet")
 
     results_embedded_df.write_parquet("data_v2/results_embedded_df.parquet")
-    races_embedded_df.write_parquet("data_v2/races_embedded_df.parquet")
+    races_base_embedded_df.write_parquet("data_v2/races_base_embedded_df.parquet")
+    races_inference_embedded_df.write_parquet("data_v2/races_inference_embedded_df.parquet")
 
 def assert_embedding_dimension():
     pre_embed_features_df = pl.read_parquet("data_v2/pre_embed_features_df.parquet")
@@ -897,7 +987,7 @@ def assert_embedding_dimension():
 
 def assert_embedding_similarity():
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    races_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     results_embedded_with_similarity = add_embedding_similarity_to_results_df(
         results_embedded_df=results_embedded_df,
         races_embedded_df=races_embedded_df,
@@ -908,7 +998,7 @@ def assert_embedding_similarity():
 if __name__ == "__main__":
     create_normalized_race_data()
     main()
-    # assert_embedding_dimension()
+    assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()

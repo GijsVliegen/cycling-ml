@@ -1,1237 +1,1298 @@
-[{
-    "name": "tadej-pogacar",
-    "cost": 14
-},{
-    "name": "mathieu-van-der-poel",
-    "cost": 14
-},{
-    "name": "remco-evenepoel",
-    "cost": 12
-},{
-    "name": "wout-van-aert",
-    "cost": 11
-},{
-    "name": "mads-pedersen",
-    "cost": 10
-},{
-    "name": "jasper-philipsen",
-    "cost": 9
-},{
-    "name": "tim-merlier",
-    "cost": 8
-},{
-    "name": "tom-pidcock",
-    "cost": 8
-},{
-    "name": "jonas-vingegaard",
-    "cost": 8
-},{
-    "name": "juan-ayuso",
-    "cost": 7
-},{
-    "name": "isaac-del-toro",
-    "cost": 7
-},{
-    "name": "filippo-ganna",
-    "cost": 7
-},{
-    "name": "ben-healy",
-    "cost": 7
-},{
-    "name": "paul-magnier",
-    "cost": 7
-},{
-    "name": "jonathan-milan",
-    "cost": 7
-},{
-    "name": "primoz-roglic",
-    "cost": 7
-},{
-    "name": "mattias-skjelmose",
-    "cost": 7
-},{
-    "name": "joao-almeida",
-    "cost": 6
-},{
-    "name": "tiesj-benoot",
-    "cost": 6
-},{
-    "name": "matthew-brennan",
-    "cost": 6
-},{
-    "name": "richard-carapaz",
-    "cost": 6
-},{
-    "name": "arnaud-de-lie",
-    "cost": 6
-},{
-    "name": "kaden-groves",
-    "cost": 6
-},{
-    "name": "matteo-jorgenson",
-    "cost": 6
-},{
-    "name": "olav-kooij",
-    "cost": 6
-},{
-    "name": "florian-lipowitz",
-    "cost": 6
-},{
-    "name": "michael-matthews",
-    "cost": 6
-},{
-    "name": "thibau-nys",
-    "cost": 6
-},{
-    "name": "neilson-powless",
-    "cost": 6
-},{
-    "name": "jasper-stuyven",
-    "cost": 6
-},{
-    "name": "mathias-vacek",
-    "cost": 6
-},{
-    "name": "maxim-van-gils",
-    "cost": 6
-},{
-    "name": "tim-wellens",
-    "cost": 6
-},{
-    "name": "santiago-buitrago",
-    "cost": 5
-},{
-    "name": "jan-christen",
-    "cost": 5
-},{
-    "name": "giulio-ciccone",
-    "cost": 5
-},{
-    "name": "benoit-cosnefroy",
-    "cost": 5
-},{
-    "name": "tibor-del-grosso",
-    "cost": 5
-},{
-    "name": "milan-fretin",
-    "cost": 5
-},{
-    "name": "felix-gall",
-    "cost": 5
-},{
-    "name": "derek-gee",
-    "cost": 5
-},{
-    "name": "biniam-girmay",
-    "cost": 5
-},{
-    "name": "romain-gregoire",
-    "cost": 5
-},{
-    "name": "jai-hindley",
-    "cost": 5
-},{
-    "name": "marc-hirschi",
-    "cost": 5
-},{
-    "name": "hugo-hofstetter",
-    "cost": 5
-},{
-    "name": "tobias-johannessen",
-    "cost": 5
-},{
-    "name": "stefan-kung",
-    "cost": 5
-},{
-    "name": "sepp-kuss",
-    "cost": 5
-},{
-    "name": "christophe-laporte",
-    "cost": 5
-},{
-    "name": "lenny-martinez",
-    "cost": 5
-},{     
-    "name": "jordi-meeus",
-    "cost": 5
-},{
-    "name": "matej-mohoric",
-    "cost": 5
-},{
-    "name": "jhonatan-narvaez",
-    "cost": 5
-},{
-    "name": "ben-oconnor",
-    "cost": 5
-},{
-    "name": "oscar-onley",
-    "cost": 5
-},{
-    "name": "giulio-pellizzari",
-    "cost": 5
-},{
-    "name": "christian-scaroni",
-    "cost": 5
-},{
-    "name": "paul-seixas",
-    "cost": 5
-},{
-    "name": "magnus-sheffield",
-    "cost": 5
-},{
-    "name": "michael-storer",
-    "cost": 5
-},{
-    "name": "antonio-tiberi",
-    "cost": 5
-},{
-    "name": "matteo-trentin",
-    "cost": 5
-},{
-    "name": "cian-uijtdebroeks",
-    "cost": 5
-},{
-    "name": "lennert-van-eetvelt",
-    "cost": 5
-},{
-    "name": "kevin-vauquelin",
-    "cost": 5
-},{
-    "name": "florian-vermeersch",
-    "cost": 5
-},{
-    "name": "jay-vine",
-    "cost": 5
-},{
-    "name": "soren-waerenskjold",
-    "cost": 5
-},{
-    "name": "adam-yates",
-    "cost": 5
-},{
-    "name": "jonas-abrahamsen",
-    "cost": 4
-},{
-    "name": "pascal-ackermann",
-    "cost": 4
-},{
-    "name": "julian-alaphilippe",
-    "cost": 4
-},{
-    "name": "alex-aranburu",
-    "cost": 4
-},{
-    "name": "thymen-arensman",
-    "cost": 4
-},{
-    "name": "kasper-asgreen",
-    "cost": 4
-},{
-    "name": "lewis-askey",
-    "cost": 4
-},{
-    "name": "orluis-aular",
-    "cost": 4
-},{
-    "name": "davide-ballerini",
-    "cost": 4
-},{
-    "name": "louis-barre",
-    "cost": 4
-},{
-    "name": "phil-bauhaus",
-    "cost": 4
-},{
-    "name": "sam-bennett",
-    "cost": 4
-},{
-    "name": "jenno-berckmoes",
-    "cost": 4
-},{
-    "name": "egan-bernal",
-    "cost": 4
-},{
-    "name": "alberto-bettiol",
-    "cost": 4
-},{
-    "name": "pello-bilbao",
-    "cost": 4
-},{
-    "name": "pavel-bittner",
-    "cost": 4
-},{
-    "name": "cees-bol",
-    "cost": 4
-},{
-    "name": "victor-campenaerts",
-    "cost": 4
-},{
-    "name": "damiano-caruso",
-    "cost": 4
-},{
-    "name": "pablo-castrillo",
-    "cost": 4
-},{
-    "name": "bryan-coquard",
-    "cost": 4
-},{
-    "name": "magnus-cort",
-    "cost": 4
-},{
-    "name": "alberto-dainese",
-    "cost": 4
-},{
-    "name": "dries-de-bondt",
-    "cost": 4
-},{
-    "name": "arvid-de-kleijn",
-    "cost": 4
-},{
-    "name": "eddie-dunbar",
-    "cost": 4
-},{
-    "name": "nils-eekhoff",
-    "cost": 4
-},{
-    "name": "lorenzo-fortunato",
-    "cost": 4
-},{
-    "name": "ivan-garcia-cortina",
-    "cost": 4
-}, {
-    "name": "david-gaudu",
-    "cost": 4
-},{
-    "name": "fernando-gaviria",
-    "cost": 4
-},{
-    "name": "tao-geoghegan-hart",
-    "cost": 4
-},{
-    "name": "dorian-godon",
-    "cost": 4
-},{
-    "name": "dylan-groenewegen",
-    "cost": 4
-},{
-    "name": "chris-harper",
-    "cost": 4
-},{
-    "name": "ethan-hayter",
-    "cost": 4
-},{
-    "name": "quinten-hermans",
-    "cost": 4
-},{
-    "name": "fabio-jakobsen",
-    "cost": 4
-},{
-    "name": "emilien-jeanniere",
-    "cost": 4
-},{
-    "name": "jordan-jegat",
-    "cost": 4
-},{
-    "name": "max-kanter",
-    "cost": 4
-},{
-    "name": "soren-kragh",
-    "cost": 4
-},{
-    "name": "lukas-kubis",
-    "cost": 4
-},{
-    "name": "michal-kwiatkowski",
-    "cost": 4
-},{
-    "name": "luke-lamperti",
-    "cost": 4
-},{
-    "name": "mikel-landa",
-    "cost": 4
-},{
-    "name": "paul-lapeira",
-    "cost": 4
-},{
-    "name": "axel-laurance",
-    "cost": 4
-},{
-    "name": "andreas-leknessund",
-    "cost": 4   
-},{
-    "name": "tobias-lund-andresen",
-    "cost": 4
-},{
-    "name": "alexey-lutsenko",
-    "cost": 4
-},{
-    "name": "valentin-madouas",
-    "cost": 4
-},{
-    "name": "arne-marit",
-    "cost": 4
-},{
-    "name": "guillaume-martin",
-    "cost": 4
-},{
-    "name": "daniel-felipe-martínez",
-    "cost": 4
-},{
-    "name": "enric-mas",
-    "cost": 4
-},{
-    "name": "brandon-mcnulty",
-    "cost": 4
-},{
-    "name": "milan-menten",
-    "cost": 4
-},{
-    "name": "madis-mihkels",
-    "cost": 4
-},{
-    "name": "juan-sebastián-molano",
-    "cost": 4
-},{
-    "name": "antónio-morgado",
-    "cost": 4
-},{
-    "name": "matteo-moschetti",
-    "cost": 4
-},{
-    "name": "luca-mozzato",
-    "cost": 4
-},{
-    "name": "aurelien-paret-peintre",
-    "cost": 4
-},{
-    "name": "valentin-paret-peintre",
-    "cost": 4
-},{
-    "name": "paul-penhoet",
-    "cost": 4
-},{
-    "name": "laurence-pithie",
-    "cost": 4
-},{
-    "name": "lucas-plapp",
-    "cost": 4
-},{
-    "name": "rick-pluimers",
-    "cost": 4
-},{
-    "name": "nils-politt",
-    "cost": 4
-},{
-    "name": "max-poole",
-    "cost": 4
-},{
-    "name": "laurenz-rex",
-    "cost": 4
-},{
-    "name": "matthew-riccitello",
-    "cost": 4
-},{
-    "name": "carlos-rodríguez",
-    "cost": 4
-},{
-    "name": "ivan-romeo",
-    "cost": 4
-},{
-    "name": "einer-rubio",
-    "cost": 4
-},{
-    "name": "max-schachmann",
-    "cost": 4
-},{
-    "name": "mauro-schmid",
-    "cost": 4
-},{
-    "name": "alec-segaert",
-    "cost": 4
-},{
-    "name": "quinn-simmons",
-    "cost": 4
-},{
-    "name": "pavel-sivakov",
-    "cost": 4
-},{
-    "name": "toms-skujins",
-    "cost": 4
-},{
-    "name": "marc-soler",
-    "cost": 4
-},{
-    "name": "corbin-strong",
-    "cost": 4
-},{
-    "name": "joshua-tarling",
-    "cost": 4
-},{
-    "name": "mike-teunissen",
-    "cost": 4
-},{
-    "name": "dylan-teuns",
-    "cost": 4
-},{
-    "name": "gerben-thijssen",
-    "cost": 4
-},{
-    "name": "rasmus-tiller",
-    "cost": 4
-},{
-    "name": "torstein-traeen",
-    "cost": 4
-},{
-    "name": "jan-tratnik",
-    "cost": 4
-}, {
-    "name": "ben-tulett",
-    "cost": 4
-},{
-    "name": "anthony-turgis",
-    "cost": 4
-},{
-    "name": "ben-turner",
-    "cost": 4
-},{
-    "name": "attila-valter",
-    "cost": 4
-},{
-    "name": "dylan-van-baarle",
-    "cost": 4
-},{
-    "name": "marijn-van-den-berg",
-    "cost": 4
-},{
-    "name": "danny-van-poppel",
-    "cost": 4
-},{
-    "name": "mauri-vansevenant",
-    "cost": 4
-},{
-    "name": "casper-van-uden",
-    "cost": 4
-},{
-    "name": "ilan-van-wilder",
-    "cost": 4
-},{
-    "name": "simone-velasco",
-    "cost": 4
-},{
-    "name": "gianni-vermeersch",
-    "cost": 4
-},{
-    "name": "ethan-vernon",
-    "cost": 4
-},{
-    "name": "aleksandr-vlasov",
-    "cost": 4
-},{
-    "name": "sam-watson",
-    "cost": 4
-},{
-    "name": "sam-welsford",
-    "cost": 4
-},{
-    "name": "jarno-widar",
-    "cost": 4
-},{
-    "name": "fred-wright",
-    "cost": 4
-}, {
-    "name": "axel-zingle",
-    "cost": 4
-},{
-    "name": "roger-adria",
-    "cost": 3
-},{
-    "name": "toon-aerts",
-    "cost": 3
-}, {
-    "name": "edoardo-affini",
-    "cost": 3
-},{
-    "name": "mattia-agostinacchio",
-    "cost": 3
-},{
-    "name": "vincenzo-albanese",
-    "cost": 3
-},{
-    "name": "piet-allegaert",
-    "cost": 3
-},{
-    "name": "stanislaw-aniolkowski",
-    "cost": 3
-},{
-    "name": "bruno-armirail",
-    "cost": 3
-},{
-    "name": "nikias-arndt",
-    "cost": 3
-},{
-    "name": "igor-arrieta",
-    "cost": 3
-},{
-    "name": "huub-artz",
-    "cost": 3
-},{
-    "name": "andrea-bagioli",
-    "cost": 3
-},{
-    "name": "fernando-barcelo",
-    "cost": 3
-},{
-    "name": "warren-barguil",
-    "cost": 3
-},{
-    "name": "filippo-baroncini",
-    "cost": 3
-},{
-    "name": "jon-barrenetxea",
-    "cost": 3
-},{
-    "name": "samuele-battistella",
-    "cost": 3
-},{
-    "name": "alex-baudin",
-    "cost": 3
-},{
-    "name": "niklas-behrens",
-    "cost": 3
-},{
-    "name": "clement-berthet",
-    "cost": 3
-}, {
-    "name": "cedric-beullens",
-    "cost": 3
-},{
-    "name": "jenthe-biermans",
-    "cost": 3
-},{
-    "name": "leo-bisiaux",
-    "cost": 3
-},{
-    "name": "stefan-bissegger",
-    "cost": 3
-},{
-    "name": "mikkel-bjerg",
-    "cost": 3
-},{
-    "name": "joseph-blackmore",
-    "cost": 3
-},{
-    "name": "erlend-blikra",
-    "cost": 3
-},{
-    "name": "koen-bouwman",
-    "cost": 3
-},{
-    "name": "vito-braet",
-    "cost": 3
-},{
-    "name": "marco-brenner",
-    "cost": 3
-},{
-    "name": "alexys-brunel",
-    "cost": 3
-},{
-    "name": "emanuel-buchmann",
-    "cost": 3
-},{
-    "name": "mathieu-burgaudeau",
-    "cost": 3
-},{
-    "name": "francesco-busatto",
-    "cost": 3
-},{
-    "name": "carlos-canal",
-    "cost": 3
-},{
-    "name": "amaury-capiot",
-    "cost": 3
-},{
-    "name": "mattia-cattaneo",
-    "cost": 3
-},{
-    "name": "remi-cavagna",
-    "cost": 3
-},{
-    "name": "alexander-cepeda",
-    "cost": 3
-},{
-    "name": "jefferson-alveiro-cepeda",
-    "cost": 3
-}, {
-    "name": "clement-champoussin",
-    "cost": 3
-},{
-    "name": "fabio-christen",
-    "cost": 3
-},{
-    "name": "filippo-conca",
-    "cost": 3
-},{
-    "name": "simone-consonni",
-    "cost": 3
-},{
-    "name": "ewen-costiou",
-    "cost": 3
-},{
-    "name": "alessandro-covi",
-    "cost": 3
-},{
-    "name": "tom-crabbe",
-    "cost": 3
-},{
-    "name": "steff-cras",
-    "cost": 3
-},{
-    "name": "ramses-debruyne",
-    "cost": 3
-},{
-    "name": "aime-de-gendt",
-    "cost": 3
-},{
-    "name": "john-degenkolb",
-    "cost": 3
-},{
-    "name": "simon-dehairs",
-    "cost": 3
-},{
-    "name": "david-dekker",
-    "cost": 3
-},{
-    "name": "david-de-la-cruz",
-    "cost": 3
-},{
-    "name": "alexandre-delettre",
-    "cost": 3
-},{
-    "name": "nico-denz",
-    "cost": 3
-},{
-    "name": "laurens-de-plus",
-    "cost": 3
-},{
-    "name": "steffen-de-schuyteneer",
-    "cost": 3
-},{
-    "name": "silvan-dillier",
-    "cost": 3
-},{
-    "name": "paul-double",
-    "cost": 3
-},{
-    "name": "sandy-dujardin",
-    "cost": 3
-},{
-    "name": "timothy-dupont",
-    "cost": 3
-},{
-    "name": "luke-durbridge",
-    "cost": 3
-},{
-    "name": "pascal-eenkhoorn",
-    "cost": 3
-},{
-    "name": "odd-christian-eiking",
-    "cost": 3
-},{
-    "name": "itamar-einhorn",
-    "cost": 3
-},{
-    "name": "felix-engelhardt",
-    "cost": 3
-},{
-    "name": "haimar-etxeberria",
-    "cost": 3
-},{
-    "name": "afonso-eulálio",
-    "cost": 3
-},{
-    "name": "yevgeniy-fedorov",
-    "cost": 3
-},{
-    "name": "filippo-fiorelli",
-    "cost": 3
-},{
-    "name": "finn-fisher-black",
-    "cost": 3
-},{
-    "name": "anders-foldager",
-    "cost": 3
-},{
-    "name": "davide-formolo",
-    "cost": 3
-},{
-    "name": "tobias-foss",
-    "cost": 3
-},{
-    "name": "stian-fredheim",
-    "cost": 3
-},{
-    "name": "marco-frigo",
-    "cost": 3
-},{
-    "name": "frederik-frison",
-    "cost": 3
-},{
-    "name": "raul-garcia-pierna",
-    "cost": 3
-},{
-    "name": "gianmarco-garofoli",
-    "cost": 3
-},{
-    "name": "pierre-gautherat",
-    "cost": 3
-},{
-    "name": "robbe-ghys",
-    "cost": 3
-},{
-    "name": "matevz-govekar",
-    "cost": 3
-},{
-    "name": "felix-grossschartner",
-    "cost": 3
-},{
-    "name": "thibaud-gruel",
-    "cost": 3
-},{
-    "name": "tord-gudmestad",
-    "cost": 3
-},{
-    "name": "per-strand-hagenes",
-    "cost": 3
-},{
-    "name": "jack-haig",
-    "cost": 3
-},{
-    "name": "marco-haller",
-    "cost": 3
-},{
-    "name": "jesus-herrada",
-    "cost": 3
-},{
-    "name": "rune-herregodts",
-    "cost": 3
-},{
-    "name": "sergio-higuita",
-    "cost": 3
-},{
-    "name": "jan-hirt",
-    "cost": 3
-},{
-    "name": "noah-hobbs",
-    "cost": 3
-},{
-    "name": "markus-hoelgaard",
-    "cost": 3
-},{
-    "name": "mikkel-honore",
-    "cost": 3
-},{
-    "name": "daan-hoole",
-    "cost": 3
-},{
-    "name": "damien-howson",
-    "cost": 3
-},{
-    "name": "ion-izagirre",
-    "cost": 3
-},{
-    "name": "anders-johannessen",
-    "cost": 3
-},{
-    "name": "bob-jungels",
-    "cost": 3
-},{
-    "name": "lennard-kamna",
-    "cost": 3
-},{
-    "name": "alexander-kamp",
-    "cost": 3
-},{
-    "name": "wilco-kelderman",
-    "cost": 3
-},{
-    "name": "timo-kielich",
-    "cost": 3
-},{
-    "name": "alex-kirsch",
-    "cost": 3
-},{
-    "name": "oliver-knight",
-    "cost": 3
-},{
-    "name": "oded-kogut",
-    "cost": 3
-},{
-    "name": "patrick-konrad",
-    "cost": 3
-},{
-    "name": "jelte-krijnsen",
-    "cost": 3
-},{
-    "name": "andreas-kron",
-    "cost": 3
-},{
-    "name": "steven-kruijswijk",
-    "cost": 3
-},{
-    "name": "johannes-kulset",
-    "cost": 3
-},{
-    "name": "jordan-labrosse",
-    "cost": 3
-},{
-    "name": "vegard-stake-laengen",
-    "cost": 3
-},{
-    "name": "victor-lafay",
-    "cost": 3
-},{
-    "name": "yves-lampaert",
-    "cost": 3
-},{
-    "name": "niklas-larsen",
-    "cost": 3
-},{
-    "name": "junior-lecerf",
-    "cost": 3
-},{
-    "name": "iuri-leitao",
-    "cost": 3
-},{
-    "name": "bart-lemmen",
-    "cost": 3
-},{
-    "name": "emils-liepins",
-    "cost": 3
-},{
-    "name": "arjen-livyns",
-    "cost": 3
-},{
-    "name": "giovanni-lonardi",
-    "cost": 3
-},{
-    "name": "lander-loockx",
-    "cost": 3
-},{
-    "name": "harold-lopez",
-    "cost": 3
-},{
-    "name": "juan-pedro-lopez",
-    "cost": 3
-},{
-    "name": "matis-louvel",
-    "cost": 3
-},{
-    "name": "matteo-malucelli",
-    "cost": 3
-},{
-    "name": "lorrenzo-manzin",
-    "cost": 3
-},{
-    "name": "martin-marcellusi",
-    "cost": 3
-},{
-    "name": "marius-mayrhofer",
-    "cost": 3
-},{
-    "name": "xandro-meurisse",
-    "cost": 3
-},{
-    "name": "luka-mezgec",
-    "cost": 3
-},{
-    "name": "lorenzo-milesi",
-    "cost": 3
-},{
-    "name": "pau-miquel",
-    "cost": 3
-},{
-    "name": "rudy-molard",
-    "cost": 3
-},{
-    "name": "bauke-mollema",
-    "cost": 3
-},{
-    "name": "oliver-naesen",
-    "cost": 3
-},{
-    "name": "krists-neilands",
-    "cost": 3
-},{
-    "name": "lukas-nerurkar",
-    "cost": 3
-},{
-    "name": "jorgen-nordhagen",
-    "cost": 3
-},{
-    "name": "domen-novak",
-    "cost": 3
-},{
-    "name": "stefano-oldani",
-    "cost": 3
-},{
-    "name": "ivo-oliveira",
-    "cost": 3
-},{
-    "name": "rui-oliveira",
-    "cost": 3
-},{
-    "name": "jakob-omrzel",
-    "cost": 3
-},{
-    "name": "quentin-pacher",
-    "cost": 3
-},{
-    "name": "hugo-page",
-    "cost": 3
-},{
-    "name": "casper-pedersen",
-    "cost": 3
-},{
-    "name": "rasmus-pedersen",
-    "cost": 3
-},{
-    "name": "albert-philipsen",
-    "cost": 3
-},{
-    "name": "riley-pickrell",
-    "cost": 3
-},{
-    "name": "davide-piganzoli",
-    "cost": 3
-},{
-    "name": "edward-planckaert",
-    "cost": 3
-},{
-    "name": "jensen-plowright",
-    "cost": 3
-},{
-    "name": "wout-poels",
-    "cost": 3
-},{
-    "name": "eduard-prades",
-    "cost": 3
-},{
-    "name": "nicolas-prodhomme",
-    "cost": 3
-},{
-    "name": "sean-quinn",
-    "cost": 3
-},{
-    "name": "nairo-quintana",
-    "cost": 3
-},{
-    "name": "andrea-raccagni",
-    "cost": 3
-},{
-    "name": "dusan-rajovic",
-    "cost": 3
-},{
-    "name": "senna-remijn",
-    "cost": 3
-},{
-    "name": "alexis-renard",
-    "cost": 3
-},{
-    "name": "jonas-rickaert",
-    "cost": 3
-},{
-    "name": "oscar-riesebeek",
-    "cost": 3
-},{
-    "name": "brandon-rivera",
-    "cost": 3
-},{
-    "name": "remy-rochas",
-    "cost": 3
-},{
-    "name": "cristian-rodriguez",
-    "cost": 3
-},{
-    "name": "alessandro-romele",
-    "cost": 3
-},{
-    "name": "javier-romo",
-    "cost": 3
-},{
-    "name": "mathys-rondel",
-    "cost": 3
-},{
-    "name": "lorenzo-rota",
-    "cost": 3
-},{
-    "name": "clement-russo",
-    "cost": 3
-},{
-    "name": "jonas-rutsch",
-    "cost": 3
-},{
-    "name": "archie-ryan",
-    "cost": 3
-},{
-    "name": "pelayo-sanchez",
-    "cost": 3
-},{
-    "name": "nicholas-schultz",
-    "cost": 3
-},{
-    "name": "florian-senechal",
-    "cost": 3
-},{
-    "name": "gonzalo-serrano",
-    "cost": 3
-},{
-    "name": "riley-sheehan",
-    "cost": 3
-},{
-    "name": "guillermo-thomas-silva",
-    "cost": 3
-},{
-    "name": "matteo-sobrero",
-    "cost": 3
-},{
-    "name": "jakob-soderqvist",
-    "cost": 3
-},{
-    "name": "ivan-sosa",
-    "cost": 3
-},{
-    "name": "robert-stannard",
-    "cost": 3
-},{
-    "name": "johannes-staune-mittet",
-    "cost": 3
-},{
-    "name": "georg-steinhauser",
-    "cost": 3
-},{
-    "name": "jake-stewart",
-    "cost": 3
-},{
-    "name": "florian-stork",
-    "cost": 3
-},{
-    "name": "embret-svestad-bardseng",
-    "cost": 3
-},{
-    "name": "harry-sweeny",
-    "cost": 3
-},{
-    "name": "connor-swift",
-    "cost": 3
-},{
-    "name": "gleb-syritsa",
-    "cost": 3
-},{
-    "name": "lionel-taminiaux",
-    "cost": 3
-},{
-    "name": "harold-tejada",
-    "cost": 3
-},{
-    "name": "natnael-tesfatsion",
-    "cost": 3
-},{
-    "name": "jason-tesson",
-    "cost": 3
-},{
-    "name": "tim-torn-teutenberg",
-    "cost": 3
-},{
-    "name": "edward-theuns",
-    "cost": 3
-},{
-    "name": "benjamin-thomas",
-    "cost": 3
-},{
-    "name": "rory-townsend",
-    "cost": 3
-},{
-    "name": "bastien-tronchon",
-    "cost": 3
-},{
-    "name": "henri-uhlig",
-    "cost": 3
-},{
-    "name": "diego-ulissi",
-    "cost": 3
-},{
-    "name": "milan-vader",
-    "cost": 3
-},{
-    "name": "michael-valgren",
-    "cost": 3
-},{
-    "name": "tom-van-asbroeck",
-    "cost": 3
-},{
-    "name": "luca-van-boven",
-    "cost": 3
-},{
-    "name": "fabio-van-den-bossche",
-    "cost": 3
-},{
-    "name": "frank-van-den-broek",
-    "cost": 3
-},{
-    "name": "taco-van-der-hoorn",
-    "cost": 3
-},{
-    "name": "mick-van-dijke",
-    "cost": 3
-},{
-    "name": "tim-van-dijke",
-    "cost": 3
-},{
-    "name": "dries-van-gestel",
-    "cost": 3
-},{
-    "name": "bert-van-lerberghe",
-    "cost": 3
-},{
-    "name": "vlad-van-mechelen",
-    "cost": 3
-},{
-    "name": "brent-van-moer",
-    "cost": 3
-},{
-    "name": "andrea-vendrame",
-    "cost": 3
-},{
-    "name": "clement-venturini",
-    "cost": 3
-},{
-    "name": "kevin-vermaerke",
-    "cost": 3
-},{
-    "name": "carlos-verona",
-    "cost": 3
-},{
-    "name": "emiel-verstrynge",
-    "cost": 3
-},{
-    "name": "max-walscheid",
-    "cost": 3
-},{
-    "name": "frederik-wandahl",
-    "cost": 3
-},{
-    "name": "stephen-williams",
-    "cost": 3
-},{
-    "name": "edoardo-zambanini",
-    "cost": 3
-},{
-    "name": "filippo-zana",
-    "cost": 3
-},{
-    "name": "maikel-zijlaard",
-    "cost": 3
-},{
-    "name": "georg-zimmermann",
-    "cost": 3
-}]
+{
+    "budgets": [{
+        "name": "tadej-pogacar",
+        "cost": 14
+    },{
+        "name": "mathieu-van-der-poel",
+        "cost": 14
+    },{
+        "name": "remco-evenepoel",
+        "cost": 12
+    },{
+        "name": "wout-van-aert",
+        "cost": 11
+    },{
+        "name": "mads-pedersen",
+        "cost": 10
+    },{
+        "name": "jasper-philipsen",
+        "cost": 9
+    },{
+        "name": "tim-merlier",
+        "cost": 8
+    },{
+        "name": "tom-pidcock",
+        "cost": 8
+    },{
+        "name": "jonas-vingegaard",
+        "cost": 8
+    },{
+        "name": "juan-ayuso",
+        "cost": 7
+    },{
+        "name": "isaac-del-toro",
+        "cost": 7
+    },{
+        "name": "filippo-ganna",
+        "cost": 7
+    },{
+        "name": "ben-healy",
+        "cost": 7
+    },{
+        "name": "paul-magnier",
+        "cost": 7
+    },{
+        "name": "jonathan-milan",
+        "cost": 7
+    },{
+        "name": "primoz-roglic",
+        "cost": 7
+    },{
+        "name": "mattias-skjelmose",
+        "cost": 7
+    },{
+        "name": "joao-almeida",
+        "cost": 6
+    },{
+        "name": "tiesj-benoot",
+        "cost": 6
+    },{
+        "name": "matthew-brennan",
+        "cost": 6
+    },{
+        "name": "richard-carapaz",
+        "cost": 6
+    },{
+        "name": "arnaud-de-lie",
+        "cost": 6
+    },{
+        "name": "kaden-groves",
+        "cost": 6
+    },{
+        "name": "matteo-jorgenson",
+        "cost": 6
+    },{
+        "name": "olav-kooij",
+        "cost": 6
+    },{
+        "name": "florian-lipowitz",
+        "cost": 6
+    },{
+        "name": "michael-matthews",
+        "cost": 6
+    },{
+        "name": "thibau-nys",
+        "cost": 6
+    },{
+        "name": "neilson-powless",
+        "cost": 6
+    },{
+        "name": "jasper-stuyven",
+        "cost": 6
+    },{
+        "name": "mathias-vacek",
+        "cost": 6
+    },{
+        "name": "maxim-van-gils",
+        "cost": 6
+    },{
+        "name": "tim-wellens",
+        "cost": 6
+    },{
+        "name": "santiago-buitrago",
+        "cost": 5
+    },{
+        "name": "jan-christen",
+        "cost": 5
+    },{
+        "name": "giulio-ciccone",
+        "cost": 5
+    },{
+        "name": "benoit-cosnefroy",
+        "cost": 5
+    },{
+        "name": "tibor-del-grosso",
+        "cost": 5
+    },{
+        "name": "milan-fretin",
+        "cost": 5
+    },{
+        "name": "felix-gall",
+        "cost": 5
+    },{
+        "name": "derek-gee",
+        "cost": 5
+    },{
+        "name": "biniam-girmay",
+        "cost": 5
+    },{
+        "name": "romain-gregoire",
+        "cost": 5
+    },{
+        "name": "jai-hindley",
+        "cost": 5
+    },{
+        "name": "marc-hirschi",
+        "cost": 5
+    },{
+        "name": "hugo-hofstetter",
+        "cost": 5
+    },{
+        "name": "tobias-johannessen",
+        "cost": 5
+    },{
+        "name": "stefan-kung",
+        "cost": 5
+    },{
+        "name": "sepp-kuss",
+        "cost": 5
+    },{
+        "name": "christophe-laporte",
+        "cost": 5
+    },{
+        "name": "lenny-martinez",
+        "cost": 5
+    },{     
+        "name": "jordi-meeus",
+        "cost": 5
+    },{
+        "name": "matej-mohoric",
+        "cost": 5
+    },{
+        "name": "jhonatan-narvaez",
+        "cost": 5
+    },{
+        "name": "ben-oconnor",
+        "cost": 5
+    },{
+        "name": "oscar-onley",
+        "cost": 5
+    },{
+        "name": "giulio-pellizzari",
+        "cost": 5
+    },{
+        "name": "christian-scaroni",
+        "cost": 5
+    },{
+        "name": "paul-seixas",
+        "cost": 5
+    },{
+        "name": "magnus-sheffield",
+        "cost": 5
+    },{
+        "name": "michael-storer",
+        "cost": 5
+    },{
+        "name": "antonio-tiberi",
+        "cost": 5
+    },{
+        "name": "matteo-trentin",
+        "cost": 5
+    },{
+        "name": "cian-uijtdebroeks",
+        "cost": 5
+    },{
+        "name": "lennert-van-eetvelt",
+        "cost": 5
+    },{
+        "name": "kevin-vauquelin",
+        "cost": 5
+    },{
+        "name": "florian-vermeersch",
+        "cost": 5
+    },{
+        "name": "jay-vine",
+        "cost": 5
+    },{
+        "name": "soren-waerenskjold",
+        "cost": 5
+    },{
+        "name": "adam-yates",
+        "cost": 5
+    },{
+        "name": "jonas-abrahamsen",
+        "cost": 4
+    },{
+        "name": "pascal-ackermann",
+        "cost": 4
+    },{
+        "name": "julian-alaphilippe",
+        "cost": 4
+    },{
+        "name": "alex-aranburu",
+        "cost": 4
+    },{
+        "name": "thymen-arensman",
+        "cost": 4
+    },{
+        "name": "kasper-asgreen",
+        "cost": 4
+    },{
+        "name": "lewis-askey",
+        "cost": 4
+    },{
+        "name": "orluis-aular",
+        "cost": 4
+    },{
+        "name": "davide-ballerini",
+        "cost": 4
+    },{
+        "name": "louis-barre",
+        "cost": 4
+    },{
+        "name": "phil-bauhaus",
+        "cost": 4
+    },{
+        "name": "sam-bennett",
+        "cost": 4
+    },{
+        "name": "jenno-berckmoes",
+        "cost": 4
+    },{
+        "name": "egan-bernal",
+        "cost": 4
+    },{
+        "name": "alberto-bettiol",
+        "cost": 4
+    },{
+        "name": "pello-bilbao",
+        "cost": 4
+    },{
+        "name": "pavel-bittner",
+        "cost": 4
+    },{
+        "name": "cees-bol",
+        "cost": 4
+    },{
+        "name": "victor-campenaerts",
+        "cost": 4
+    },{
+        "name": "damiano-caruso",
+        "cost": 4
+    },{
+        "name": "pablo-castrillo",
+        "cost": 4
+    },{
+        "name": "bryan-coquard",
+        "cost": 4
+    },{
+        "name": "magnus-cort",
+        "cost": 4
+    },{
+        "name": "alberto-dainese",
+        "cost": 4
+    },{
+        "name": "dries-de-bondt",
+        "cost": 4
+    },{
+        "name": "arvid-de-kleijn",
+        "cost": 4
+    },{
+        "name": "eddie-dunbar",
+        "cost": 4
+    },{
+        "name": "nils-eekhoff",
+        "cost": 4
+    },{
+        "name": "lorenzo-fortunato",
+        "cost": 4
+    },{
+        "name": "ivan-garcia-cortina",
+        "cost": 4
+    }, {
+        "name": "david-gaudu",
+        "cost": 4
+    },{
+        "name": "fernando-gaviria",
+        "cost": 4
+    },{
+        "name": "tao-geoghegan-hart",
+        "cost": 4
+    },{
+        "name": "dorian-godon",
+        "cost": 4
+    },{
+        "name": "dylan-groenewegen",
+        "cost": 4
+    },{
+        "name": "chris-harper",
+        "cost": 4
+    },{
+        "name": "ethan-hayter",
+        "cost": 4
+    },{
+        "name": "quinten-hermans",
+        "cost": 4
+    },{
+        "name": "fabio-jakobsen",
+        "cost": 4
+    },{
+        "name": "emilien-jeanniere",
+        "cost": 4
+    },{
+        "name": "jordan-jegat",
+        "cost": 4
+    },{
+        "name": "max-kanter",
+        "cost": 4
+    },{
+        "name": "soren-kragh",
+        "cost": 4
+    },{
+        "name": "lukas-kubis",
+        "cost": 4
+    },{
+        "name": "michal-kwiatkowski",
+        "cost": 4
+    },{
+        "name": "luke-lamperti",
+        "cost": 4
+    },{
+        "name": "mikel-landa",
+        "cost": 4
+    },{
+        "name": "paul-lapeira",
+        "cost": 4
+    },{
+        "name": "axel-laurance",
+        "cost": 4
+    },{
+        "name": "andreas-leknessund",
+        "cost": 4   
+    },{
+        "name": "tobias-lund-andresen",
+        "cost": 4
+    },{
+        "name": "alexey-lutsenko",
+        "cost": 4
+    },{
+        "name": "valentin-madouas",
+        "cost": 4
+    },{
+        "name": "arne-marit",
+        "cost": 4
+    },{
+        "name": "guillaume-martin",
+        "cost": 4
+    },{
+        "name": "daniel-felipe-martínez",
+        "cost": 4
+    },{
+        "name": "enric-mas",
+        "cost": 4
+    },{
+        "name": "brandon-mcnulty",
+        "cost": 4
+    },{
+        "name": "milan-menten",
+        "cost": 4
+    },{
+        "name": "madis-mihkels",
+        "cost": 4
+    },{
+        "name": "juan-sebastián-molano",
+        "cost": 4
+    },{
+        "name": "antónio-morgado",
+        "cost": 4
+    },{
+        "name": "matteo-moschetti",
+        "cost": 4
+    },{
+        "name": "luca-mozzato",
+        "cost": 4
+    },{
+        "name": "aurelien-paret-peintre",
+        "cost": 4
+    },{
+        "name": "valentin-paret-peintre",
+        "cost": 4
+    },{
+        "name": "paul-penhoet",
+        "cost": 4
+    },{
+        "name": "laurence-pithie",
+        "cost": 4
+    },{
+        "name": "lucas-plapp",
+        "cost": 4
+    },{
+        "name": "rick-pluimers",
+        "cost": 4
+    },{
+        "name": "nils-politt",
+        "cost": 4
+    },{
+        "name": "max-poole",
+        "cost": 4
+    },{
+        "name": "laurenz-rex",
+        "cost": 4
+    },{
+        "name": "matthew-riccitello",
+        "cost": 4
+    },{
+        "name": "carlos-rodríguez",
+        "cost": 4
+    },{
+        "name": "ivan-romeo",
+        "cost": 4
+    },{
+        "name": "einer-rubio",
+        "cost": 4
+    },{
+        "name": "max-schachmann",
+        "cost": 4
+    },{
+        "name": "mauro-schmid",
+        "cost": 4
+    },{
+        "name": "alec-segaert",
+        "cost": 4
+    },{
+        "name": "quinn-simmons",
+        "cost": 4
+    },{
+        "name": "pavel-sivakov",
+        "cost": 4
+    },{
+        "name": "toms-skujins",
+        "cost": 4
+    },{
+        "name": "marc-soler",
+        "cost": 4
+    },{
+        "name": "corbin-strong",
+        "cost": 4
+    },{
+        "name": "joshua-tarling",
+        "cost": 4
+    },{
+        "name": "mike-teunissen",
+        "cost": 4
+    },{
+        "name": "dylan-teuns",
+        "cost": 4
+    },{
+        "name": "gerben-thijssen",
+        "cost": 4
+    },{
+        "name": "rasmus-tiller",
+        "cost": 4
+    },{
+        "name": "torstein-traeen",
+        "cost": 4
+    },{
+        "name": "jan-tratnik",
+        "cost": 4
+    }, {
+        "name": "ben-tulett",
+        "cost": 4
+    },{
+        "name": "anthony-turgis",
+        "cost": 4
+    },{
+        "name": "ben-turner",
+        "cost": 4
+    },{
+        "name": "attila-valter",
+        "cost": 4
+    },{
+        "name": "dylan-van-baarle",
+        "cost": 4
+    },{
+        "name": "marijn-van-den-berg",
+        "cost": 4
+    },{
+        "name": "danny-van-poppel",
+        "cost": 4
+    },{
+        "name": "mauri-vansevenant",
+        "cost": 4
+    },{
+        "name": "casper-van-uden",
+        "cost": 4
+    },{
+        "name": "ilan-van-wilder",
+        "cost": 4
+    },{
+        "name": "simone-velasco",
+        "cost": 4
+    },{
+        "name": "gianni-vermeersch",
+        "cost": 4
+    },{
+        "name": "ethan-vernon",
+        "cost": 4
+    },{
+        "name": "aleksandr-vlasov",
+        "cost": 4
+    },{
+        "name": "sam-watson",
+        "cost": 4
+    },{
+        "name": "sam-welsford",
+        "cost": 4
+    },{
+        "name": "jarno-widar",
+        "cost": 4
+    },{
+        "name": "fred-wright",
+        "cost": 4
+    }, {
+        "name": "axel-zingle",
+        "cost": 4
+    },{
+        "name": "roger-adria",
+        "cost": 3
+    },{
+        "name": "toon-aerts",
+        "cost": 3
+    }, {
+        "name": "edoardo-affini",
+        "cost": 3
+    },{
+        "name": "mattia-agostinacchio",
+        "cost": 3
+    },{
+        "name": "vincenzo-albanese",
+        "cost": 3
+    },{
+        "name": "piet-allegaert",
+        "cost": 3
+    },{
+        "name": "stanislaw-aniolkowski",
+        "cost": 3
+    },{
+        "name": "bruno-armirail",
+        "cost": 3
+    },{
+        "name": "nikias-arndt",
+        "cost": 3
+    },{
+        "name": "igor-arrieta",
+        "cost": 3
+    },{
+        "name": "huub-artz",
+        "cost": 3
+    },{
+        "name": "andrea-bagioli",
+        "cost": 3
+    },{
+        "name": "fernando-barcelo",
+        "cost": 3
+    },{
+        "name": "warren-barguil",
+        "cost": 3
+    },{
+        "name": "filippo-baroncini",
+        "cost": 3
+    },{
+        "name": "jon-barrenetxea",
+        "cost": 3
+    },{
+        "name": "samuele-battistella",
+        "cost": 3
+    },{
+        "name": "alex-baudin",
+        "cost": 3
+    },{
+        "name": "niklas-behrens",
+        "cost": 3
+    },{
+        "name": "clement-berthet",
+        "cost": 3
+    }, {
+        "name": "cedric-beullens",
+        "cost": 3
+    },{
+        "name": "jenthe-biermans",
+        "cost": 3
+    },{
+        "name": "leo-bisiaux",
+        "cost": 3
+    },{
+        "name": "stefan-bissegger",
+        "cost": 3
+    },{
+        "name": "mikkel-bjerg",
+        "cost": 3
+    },{
+        "name": "joseph-blackmore",
+        "cost": 3
+    },{
+        "name": "erlend-blikra",
+        "cost": 3
+    },{
+        "name": "koen-bouwman",
+        "cost": 3
+    },{
+        "name": "vito-braet",
+        "cost": 3
+    },{
+        "name": "marco-brenner",
+        "cost": 3
+    },{
+        "name": "alexys-brunel",
+        "cost": 3
+    },{
+        "name": "emanuel-buchmann",
+        "cost": 3
+    },{
+        "name": "mathieu-burgaudeau",
+        "cost": 3
+    },{
+        "name": "francesco-busatto",
+        "cost": 3
+    },{
+        "name": "carlos-canal",
+        "cost": 3
+    },{
+        "name": "amaury-capiot",
+        "cost": 3
+    },{
+        "name": "mattia-cattaneo",
+        "cost": 3
+    },{
+        "name": "remi-cavagna",
+        "cost": 3
+    },{
+        "name": "alexander-cepeda",
+        "cost": 3
+    },{
+        "name": "jefferson-alveiro-cepeda",
+        "cost": 3
+    }, {
+        "name": "clement-champoussin",
+        "cost": 3
+    },{
+        "name": "fabio-christen",
+        "cost": 3
+    },{
+        "name": "filippo-conca",
+        "cost": 3
+    },{
+        "name": "simone-consonni",
+        "cost": 3
+    },{
+        "name": "ewen-costiou",
+        "cost": 3
+    },{
+        "name": "alessandro-covi",
+        "cost": 3
+    },{
+        "name": "tom-crabbe",
+        "cost": 3
+    },{
+        "name": "steff-cras",
+        "cost": 3
+    },{
+        "name": "ramses-debruyne",
+        "cost": 3
+    },{
+        "name": "aime-de-gendt",
+        "cost": 3
+    },{
+        "name": "john-degenkolb",
+        "cost": 3
+    },{
+        "name": "simon-dehairs",
+        "cost": 3
+    },{
+        "name": "david-dekker",
+        "cost": 3
+    },{
+        "name": "david-de-la-cruz",
+        "cost": 3
+    },{
+        "name": "alexandre-delettre",
+        "cost": 3
+    },{
+        "name": "nico-denz",
+        "cost": 3
+    },{
+        "name": "laurens-de-plus",
+        "cost": 3
+    },{
+        "name": "steffen-de-schuyteneer",
+        "cost": 3
+    },{
+        "name": "silvan-dillier",
+        "cost": 3
+    },{
+        "name": "paul-double",
+        "cost": 3
+    },{
+        "name": "sandy-dujardin",
+        "cost": 3
+    },{
+        "name": "timothy-dupont",
+        "cost": 3
+    },{
+        "name": "luke-durbridge",
+        "cost": 3
+    },{
+        "name": "pascal-eenkhoorn",
+        "cost": 3
+    },{
+        "name": "odd-christian-eiking",
+        "cost": 3
+    },{
+        "name": "itamar-einhorn",
+        "cost": 3
+    },{
+        "name": "felix-engelhardt",
+        "cost": 3
+    },{
+        "name": "haimar-etxeberria",
+        "cost": 3
+    },{
+        "name": "afonso-eulálio",
+        "cost": 3
+    },{
+        "name": "yevgeniy-fedorov",
+        "cost": 3
+    },{
+        "name": "filippo-fiorelli",
+        "cost": 3
+    },{
+        "name": "finn-fisher-black",
+        "cost": 3
+    },{
+        "name": "anders-foldager",
+        "cost": 3
+    },{
+        "name": "davide-formolo",
+        "cost": 3
+    },{
+        "name": "tobias-foss",
+        "cost": 3
+    },{
+        "name": "stian-fredheim",
+        "cost": 3
+    },{
+        "name": "marco-frigo",
+        "cost": 3
+    },{
+        "name": "frederik-frison",
+        "cost": 3
+    },{
+        "name": "raul-garcia-pierna",
+        "cost": 3
+    },{
+        "name": "gianmarco-garofoli",
+        "cost": 3
+    },{
+        "name": "pierre-gautherat",
+        "cost": 3
+    },{
+        "name": "robbe-ghys",
+        "cost": 3
+    },{
+        "name": "matevz-govekar",
+        "cost": 3
+    },{
+        "name": "felix-grossschartner",
+        "cost": 3
+    },{
+        "name": "thibaud-gruel",
+        "cost": 3
+    },{
+        "name": "tord-gudmestad",
+        "cost": 3
+    },{
+        "name": "per-strand-hagenes",
+        "cost": 3
+    },{
+        "name": "jack-haig",
+        "cost": 3
+    },{
+        "name": "marco-haller",
+        "cost": 3
+    },{
+        "name": "jesus-herrada",
+        "cost": 3
+    },{
+        "name": "rune-herregodts",
+        "cost": 3
+    },{
+        "name": "sergio-higuita",
+        "cost": 3
+    },{
+        "name": "jan-hirt",
+        "cost": 3
+    },{
+        "name": "noah-hobbs",
+        "cost": 3
+    },{
+        "name": "markus-hoelgaard",
+        "cost": 3
+    },{
+        "name": "mikkel-honore",
+        "cost": 3
+    },{
+        "name": "daan-hoole",
+        "cost": 3
+    },{
+        "name": "damien-howson",
+        "cost": 3
+    },{
+        "name": "ion-izagirre",
+        "cost": 3
+    },{
+        "name": "anders-johannessen",
+        "cost": 3
+    },{
+        "name": "bob-jungels",
+        "cost": 3
+    },{
+        "name": "lennard-kamna",
+        "cost": 3
+    },{
+        "name": "alexander-kamp",
+        "cost": 3
+    },{
+        "name": "wilco-kelderman",
+        "cost": 3
+    },{
+        "name": "timo-kielich",
+        "cost": 3
+    },{
+        "name": "alex-kirsch",
+        "cost": 3
+    },{
+        "name": "oliver-knight",
+        "cost": 3
+    },{
+        "name": "oded-kogut",
+        "cost": 3
+    },{
+        "name": "patrick-konrad",
+        "cost": 3
+    },{
+        "name": "jelte-krijnsen",
+        "cost": 3
+    },{
+        "name": "andreas-kron",
+        "cost": 3
+    },{
+        "name": "steven-kruijswijk",
+        "cost": 3
+    },{
+        "name": "johannes-kulset",
+        "cost": 3
+    },{
+        "name": "jordan-labrosse",
+        "cost": 3
+    },{
+        "name": "vegard-stake-laengen",
+        "cost": 3
+    },{
+        "name": "victor-lafay",
+        "cost": 3
+    },{
+        "name": "yves-lampaert",
+        "cost": 3
+    },{
+        "name": "niklas-larsen",
+        "cost": 3
+    },{
+        "name": "junior-lecerf",
+        "cost": 3
+    },{
+        "name": "iuri-leitao",
+        "cost": 3
+    },{
+        "name": "bart-lemmen",
+        "cost": 3
+    },{
+        "name": "emils-liepins",
+        "cost": 3
+    },{
+        "name": "arjen-livyns",
+        "cost": 3
+    },{
+        "name": "giovanni-lonardi",
+        "cost": 3
+    },{
+        "name": "lander-loockx",
+        "cost": 3
+    },{
+        "name": "harold-lopez",
+        "cost": 3
+    },{
+        "name": "juan-pedro-lopez",
+        "cost": 3
+    },{
+        "name": "matis-louvel",
+        "cost": 3
+    },{
+        "name": "matteo-malucelli",
+        "cost": 3
+    },{
+        "name": "lorrenzo-manzin",
+        "cost": 3
+    },{
+        "name": "martin-marcellusi",
+        "cost": 3
+    },{
+        "name": "marius-mayrhofer",
+        "cost": 3
+    },{
+        "name": "xandro-meurisse",
+        "cost": 3
+    },{
+        "name": "luka-mezgec",
+        "cost": 3
+    },{
+        "name": "lorenzo-milesi",
+        "cost": 3
+    },{
+        "name": "pau-miquel",
+        "cost": 3
+    },{
+        "name": "rudy-molard",
+        "cost": 3
+    },{
+        "name": "bauke-mollema",
+        "cost": 3
+    },{
+        "name": "oliver-naesen",
+        "cost": 3
+    },{
+        "name": "krists-neilands",
+        "cost": 3
+    },{
+        "name": "lukas-nerurkar",
+        "cost": 3
+    },{
+        "name": "jorgen-nordhagen",
+        "cost": 3
+    },{
+        "name": "domen-novak",
+        "cost": 3
+    },{
+        "name": "stefano-oldani",
+        "cost": 3
+    },{
+        "name": "ivo-oliveira",
+        "cost": 3
+    },{
+        "name": "rui-oliveira",
+        "cost": 3
+    },{
+        "name": "jakob-omrzel",
+        "cost": 3
+    },{
+        "name": "quentin-pacher",
+        "cost": 3
+    },{
+        "name": "hugo-page",
+        "cost": 3
+    },{
+        "name": "casper-pedersen",
+        "cost": 3
+    },{
+        "name": "rasmus-pedersen",
+        "cost": 3
+    },{
+        "name": "albert-philipsen",
+        "cost": 3
+    },{
+        "name": "riley-pickrell",
+        "cost": 3
+    },{
+        "name": "davide-piganzoli",
+        "cost": 3
+    },{
+        "name": "edward-planckaert",
+        "cost": 3
+    },{
+        "name": "jensen-plowright",
+        "cost": 3
+    },{
+        "name": "wout-poels",
+        "cost": 3
+    },{
+        "name": "eduard-prades",
+        "cost": 3
+    },{
+        "name": "nicolas-prodhomme",
+        "cost": 3
+    },{
+        "name": "sean-quinn",
+        "cost": 3
+    },{
+        "name": "nairo-quintana",
+        "cost": 3
+    },{
+        "name": "andrea-raccagni",
+        "cost": 3
+    },{
+        "name": "dusan-rajovic",
+        "cost": 3
+    },{
+        "name": "senna-remijn",
+        "cost": 3
+    },{
+        "name": "alexis-renard",
+        "cost": 3
+    },{
+        "name": "jonas-rickaert",
+        "cost": 3
+    },{
+        "name": "oscar-riesebeek",
+        "cost": 3
+    },{
+        "name": "brandon-rivera",
+        "cost": 3
+    },{
+        "name": "remy-rochas",
+        "cost": 3
+    },{
+        "name": "cristian-rodriguez",
+        "cost": 3
+    },{
+        "name": "alessandro-romele",
+        "cost": 3
+    },{
+        "name": "javier-romo",
+        "cost": 3
+    },{
+        "name": "mathys-rondel",
+        "cost": 3
+    },{
+        "name": "lorenzo-rota",
+        "cost": 3
+    },{
+        "name": "clement-russo",
+        "cost": 3
+    },{
+        "name": "jonas-rutsch",
+        "cost": 3
+    },{
+        "name": "archie-ryan",
+        "cost": 3
+    },{
+        "name": "pelayo-sanchez",
+        "cost": 3
+    },{
+        "name": "nicholas-schultz",
+        "cost": 3
+    },{
+        "name": "florian-senechal",
+        "cost": 3
+    },{
+        "name": "gonzalo-serrano",
+        "cost": 3
+    },{
+        "name": "riley-sheehan",
+        "cost": 3
+    },{
+        "name": "guillermo-thomas-silva",
+        "cost": 3
+    },{
+        "name": "matteo-sobrero",
+        "cost": 3
+    },{
+        "name": "jakob-soderqvist",
+        "cost": 3
+    },{
+        "name": "ivan-sosa",
+        "cost": 3
+    },{
+        "name": "robert-stannard",
+        "cost": 3
+    },{
+        "name": "johannes-staune-mittet",
+        "cost": 3
+    },{
+        "name": "georg-steinhauser",
+        "cost": 3
+    },{
+        "name": "jake-stewart",
+        "cost": 3
+    },{
+        "name": "florian-stork",
+        "cost": 3
+    },{
+        "name": "embret-svestad-bardseng",
+        "cost": 3
+    },{
+        "name": "harry-sweeny",
+        "cost": 3
+    },{
+        "name": "connor-swift",
+        "cost": 3
+    },{
+        "name": "gleb-syritsa",
+        "cost": 3
+    },{
+        "name": "lionel-taminiaux",
+        "cost": 3
+    },{
+        "name": "harold-tejada",
+        "cost": 3
+    },{
+        "name": "natnael-tesfatsion",
+        "cost": 3
+    },{
+        "name": "jason-tesson",
+        "cost": 3
+    },{
+        "name": "tim-torn-teutenberg",
+        "cost": 3
+    },{
+        "name": "edward-theuns",
+        "cost": 3
+    },{
+        "name": "benjamin-thomas",
+        "cost": 3
+    },{
+        "name": "rory-townsend",
+        "cost": 3
+    },{
+        "name": "bastien-tronchon",
+        "cost": 3
+    },{
+        "name": "henri-uhlig",
+        "cost": 3
+    },{
+        "name": "diego-ulissi",
+        "cost": 3
+    },{
+        "name": "milan-vader",
+        "cost": 3
+    },{
+        "name": "michael-valgren",
+        "cost": 3
+    },{
+        "name": "tom-van-asbroeck",
+        "cost": 3
+    },{
+        "name": "luca-van-boven",
+        "cost": 3
+    },{
+        "name": "fabio-van-den-bossche",
+        "cost": 3
+    },{
+        "name": "frank-van-den-broek",
+        "cost": 3
+    },{
+        "name": "taco-van-der-hoorn",
+        "cost": 3
+    },{
+        "name": "mick-van-dijke",
+        "cost": 3
+    },{
+        "name": "tim-van-dijke",
+        "cost": 3
+    },{
+        "name": "dries-van-gestel",
+        "cost": 3
+    },{
+        "name": "bert-van-lerberghe",
+        "cost": 3
+    },{
+        "name": "vlad-van-mechelen",
+        "cost": 3
+    },{
+        "name": "brent-van-moer",
+        "cost": 3
+    },{
+        "name": "andrea-vendrame",
+        "cost": 3
+    },{
+        "name": "clement-venturini",
+        "cost": 3
+    },{
+        "name": "kevin-vermaerke",
+        "cost": 3
+    },{
+        "name": "carlos-verona",
+        "cost": 3
+    },{
+        "name": "emiel-verstrynge",
+        "cost": 3
+    },{
+        "name": "max-walscheid",
+        "cost": 3
+    },{
+        "name": "frederik-wandahl",
+        "cost": 3
+    },{
+        "name": "stephen-williams",
+        "cost": 3
+    },{
+        "name": "edoardo-zambanini",
+        "cost": 3
+    },{
+        "name": "filippo-zana",
+        "cost": 3
+    },{
+        "name": "maikel-zijlaard",
+        "cost": 3
+    },{
+        "name": "georg-zimmermann",
+        "cost": 3
+    }],
+    "riders_with_calender_known": [
+        "tobias-lund-andresen",
+        "toon-aerts",
+        "julian-alphilippe",
+        "joao-almeida",
+        "huub-artz",
+        "juan-ayuso",
+        "louis-barre",
+        "tiesj-benoot",
+        "jenno-berckmoes",
+        "matthew-brennan",
+        "benoit-cosnefroy",
+        "tom-crabbe",
+        "arnaud-de-lie",
+        "isaac-del-toro",
+        "steffen-de-schuyteneer",
+        "remco-evenepoel",
+        "milan-fretin",
+        "dylan-groenewegen",
+        "quinten-hermans",
+        "hugo-hofstetter",
+        "fabio-jakobsen",
+        "matteo-jorgenson",
+        "timo-kielich",
+        "lukas-kubis",
+        "stefan-kung",
+        "christophe-laporte",
+        "paul-magnier",
+        "michael-matthews",
+        "jordi-meeus",
+        "milan-menten",
+        "jonathan-milan",
+        "antonio-morgado",
+        "oliver-naesen",
+        "thibau-nys",
+        "mads-pedersen",
+        "jasper-philipsen",
+        "tom-pidcock",
+        "laurence-pithie",
+        "rick-pluimers",
+        "tadej-pogacar",
+        "neilson-powless",
+        "mauro-schmid",
+        "paul-seixas",
+        "quinn-simmons",
+        "mattias-skjelmose",
+        "jasper-stuyven",
+        "mathias-vacek",
+        "dylan-van-baarle",
+        "maxim-van-gils",
+        "florian-vermeersch",
+        "gianni-vermeersch",
+        "jarno-widar"
+    ],
+    "left_out_due_to_unsureness":[
+        "wout-van-aert",
+        "olav-kooij",
+        "arne-marit"
+    ]
+}

@@ -66,11 +66,11 @@ class RaceModel:
             'nr_top10_370d',
             'nr_top3_370d',
             "strength_370d",
-            'nr_races_participated_40d',
-            'nr_top25_40d',
-            'nr_top10_40d',
-            'nr_top3_40d',
-            "strength_40d",
+            # 'nr_races_participated_40d',
+            # 'nr_top25_40d',
+            # 'nr_top10_40d',
+            # 'nr_top3_40d',
+            # "strength_40d",
             "cosine_similarity",
             "l1_distance",
             "relative_team_strength_rank"
@@ -118,7 +118,7 @@ class RaceModel:
         train_errors = []
         class PrintIterationCallback(xgb.callback.TrainingCallback):
             def after_iteration(xgb_self, model, epoch, evals_log):
-                if epoch % 50 == 0:
+                if epoch % 20 == 0:
                     test_y_pred = model.predict(dtest)
                     train_y_pred = model.predict(dtrain)
 
@@ -134,7 +134,7 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=1001,
+            num_boost_round=200,
             evals=[(dtrain, "train"), (dtest, "test")],
             params = {
                 # "objective": "reg:squarederror",
@@ -145,11 +145,11 @@ class RaceModel:
                 "eval_metric": "ndcg@25",
                 "ndcg_exp_gain": False,
                 "min_child_weight": 10,
-                "max_depth": 4,
+                "max_depth": 6,
                 "tree_method": "hist",
                 # "max_bin": 3,
-                "early_stopping_rounds": 50,
-                "learning_rate": 0.05,   # ↓↓↓
+                "early_stopping_rounds": 10,
+                "learning_rate": 0.1,   # ↓↓↓
                 "subsample": 0.5,
             },
             callbacks=[PrintIterationCallback()], #If you want training progress plotted
@@ -187,7 +187,7 @@ class RaceModel:
         
         class PrintIterationCallback(xgb.callback.TrainingCallback):
             def after_iteration(xgb_self, model, epoch, evals_log):
-                if epoch % 50 == 0:
+                if epoch % 20 == 0:
                     test_y_pred = model.predict(dtest)
                     train_y_pred = model.predict(dtrain)
 
@@ -201,16 +201,16 @@ class RaceModel:
             
         bst_binary = xgb.train(
             dtrain=dtrain,
-            num_boost_round=1001,
+            num_boost_round=251,
             evals=[(dtrain, "train"), (dtest, "test")],
             params={
                 "objective": "binary:logistic",
                 "eval_metric": "logloss",
                 "scale_pos_weight": scale_pos_weight,
                 "min_child_weight": 10,
-                "max_depth": 4,
+                "max_depth": 6,
                 "tree_method": "hist",
-                "early_stopping_rounds": 50,
+                "early_stopping_rounds": 10,
                 "learning_rate": 0.05,
                 "subsample": 0.5,
             },
@@ -277,7 +277,7 @@ class RaceModel:
                 pl.col("race_id") == race_id
             )
 
-            if race_year < 2016: #DO not take early data, since relies on data for 3 years back
+            if race_year < 2008: #DO not take early data, since relies on data for 3 years back
                 continue
             riders_features, rider_embeddings, ranks_to_predict = self.get_rider_feats(
                 race_results = race_results,
@@ -311,16 +311,17 @@ class RaceModel:
             raise ValueError("Negative values found in ranks_to_predict, expected non-negative ranks")
         
         # NDCG@25 targets (for ranking model)
-        y_train_ndcg = np.where(y_train_raw <= 30, 1.0 / np.log2(y_train_raw + 1), 0.0)
-        y_test_ndcg = np.where(y_test_raw <= 30, 1.0 / np.log2(y_test_raw + 1), 0.0)
+        y_train_ndcg = np.where(y_train_raw <= 30, 1.0 / np.log2((y_train_raw + 6) / 5), 0.0)
+        #TODO: add weights by log2() over startlist score -> more weights for more important races
+        y_test_ndcg = np.where(y_test_raw <= 30, 1.0 / np.log2((y_test_raw + 6) / 5), 0.0)
         
         # Binary targets (for classification model): top-25 = 1, else = 0
-        y_train_binary = np.where(y_train_raw <= 25, 1.0, 0.0).astype(np.float32)
-        y_test_binary = np.where(y_test_raw <= 25, 1.0, 0.0).astype(np.float32)
+        y_train_binary = np.where(y_train_raw <= 10, 1.0, 0.0).astype(np.float32)
+        y_test_binary = np.where(y_test_raw <= 10, 1.0, 0.0).astype(np.float32)
         
         print(f"training on {len(y_train_ndcg)} pairs")
         print(f"testing on {len(y_test_ndcg)} pairs")
-        print(f"  - positive samples (top-25): train={np.sum(y_train_binary):.0f}, test={np.sum(y_test_binary):.0f}")
+        print(f"  - positive samples (top-10): train={np.sum(y_train_binary):.0f}, test={np.sum(y_test_binary):.0f}")
 
         return X_train, y_train_ndcg, y_train_binary, train_groups, X_test, y_test_ndcg, y_test_binary, test_groups
     
@@ -674,7 +675,7 @@ def train(
 ):
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
 
@@ -690,12 +691,12 @@ def train(
     results_features = results_embedded_df.join(
         necessary_results,
         on = ["race_id", "name"],
-        how="left"
-    )
-    races_features = races_embedded_df.join(
+        how="right"
+    ).drop("year", "year_right")
+    races_features = races_inference_embedded_df.join(
         necessary_races,
         on = ["race_id"],
-        how="left"
+        how="right"
     )
     model = RaceModel()
     model.train_model(
@@ -714,7 +715,7 @@ def train(
 def evaluate():
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     
@@ -726,12 +727,12 @@ def evaluate():
     results_features = results_embedded_df.join(
         necessary_results,
         on = ["race_id", "name"],
-        how="left"
-    )
-    races_features = races_embedded_df.join(
+        how="right"
+    ).drop("year", "year_right")
+    races_features = races_inference_embedded_df.join(
         necessary_races,
         on = ["race_id"],
-        how="left"
+        how="right"
     )
     model = RaceModel()
     model.load_model()
@@ -786,7 +787,7 @@ from sklearn.metrics import log_loss
 def minimize_logloss():
     result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_embedded_df = pl.read_parquet("data_v2/races_embedded_df.parquet")
+    races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
     
@@ -800,7 +801,7 @@ def minimize_logloss():
         on = ["race_id", "name"],
         how="left"
     )
-    races_features = races_embedded_df.join(
+    races_features = races_inference_embedded_df.join(
         necessary_races,
         on = ["race_id"],
         how="left"
@@ -892,7 +893,7 @@ def main():
         train_binary=True
     )
     evaluate()
-    minimize_logloss()
+    # minimize_logloss()
 
 if __name__ == "__main__":
     main()

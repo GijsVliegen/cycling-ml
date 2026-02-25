@@ -212,6 +212,8 @@ def parse_race_profile_page(soup, race_name, year, stage_nr = 1): #if no stage r
     
     stage_data = {}
     stages_header = soup.find("h2", string="All stage profiles")
+    if stage_nr <= 0:
+        stage_nr = 1
     stage_num = 1
     try:
         ul = stages_header.find_next("ul", class_="list dashed pad4 keyvalueList")
@@ -322,9 +324,22 @@ def parse_rider_page(soup) -> dict:
         'TT': 3227, 
         'Sprint': 222, 
         'Climber': 9559, 
-        'Hills': 4118
+        'Hills': 4118,
+        "team_name": "UAE Team Emirates - XRG",
     }
     """
+
+    #team in 2026
+    team_name = None
+    for li in soup.select('ul.rdr-teams2 li.main'):
+        season = li.find('div', class_='season')
+        name_div = li.find('div', class_='name')
+        if season and season.text.strip() == '2026':
+            a_tag = name_div.find('a')
+            href = a_tag['href'] if a_tag else None
+            team_name = href.split("/")[-1] if href else None
+    
+
     # Specialties
     specialties = {}
     ul = soup.find("ul", class_="pps list")
@@ -336,17 +351,18 @@ def parse_rider_page(soup) -> dict:
                 spec = xtitle.get_text(strip=True)
                 score = int(xvalue.get_text(strip=True))
                 specialties[spec] = score
-        return specialties  
+        return specialties, team_name  
     else:
         raise RuntimeError("Could not find specialties list")
 
-def parse_startlist_page(soup) -> list[dict]:
+def parse_startlist_page(soup) -> tuple[list[dict], list[str]]:
     """
     Page example: 
-    https://www.procyclingstats.com/race/alula-tour/2026/startlist
+    https://www.procyclingstats.com/race/alula-tour/2026/startlist,
+    retrieves lists of riders and starting-teams
     """
     riders = []
-
+    teams = []
     # Each <li> under startlist_v4 is a team block
     for team_li in soup.select("ul.startlist_v4 > li"):
         # Get the team slug from the <a class="team">
@@ -357,7 +373,7 @@ def parse_startlist_page(soup) -> list[dict]:
         if not team_href.startswith("team/"):
             continue
         team_slug = team_href.split("team/")[1].strip()
-
+        teams.append(team_slug)
         # Loop over each rider in this team
         for rider_li in team_li.select("ul li"):
             rider_a = rider_li.find("a")
@@ -370,7 +386,7 @@ def parse_startlist_page(soup) -> list[dict]:
                         "team": team_slug
                     })
 
-    return riders
+    return riders, teams
 
 
 
