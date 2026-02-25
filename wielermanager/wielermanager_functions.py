@@ -1,12 +1,33 @@
 import json
 import polars as pl
+
+# try:
+    # # Try imports for when running from root directory
+    # from data_engineering.data_cleaning_functions import filter_results, filter_stats
+    # from data_engineering.soup_parsing_functions import (
+    #     get_race_profile_url,
+    #     parse_calendar_page,
+    #     parse_gc_page,
+    #     parse_race_page,
+    #     parse_race_profile_page,
+    #     parse_race_result_page,
+    #     parse_rider_page,
+    #     parse_rider_statistics_page,
+    #     parse_startlist_page
+    # )
+    # from data_engineering.selenium_webscraping import (
+    #     load_soup_from_file, 
+    #     download_page,
+    #     load_soups_from_http, 
+    #     url_to_filename
+    # )
 from data_engineering.data_structure_functions import (
     create_new_race_data
 )
-from race_prediction_functions import predict_race
+from wielermanager.race_prediction_functions import predict_race
 from data_science_functions import scores_to_probability_results
 
-with open("WIELERMANAGER_RULES.json") as f:
+with open("wielermanager/WIELERMANAGER_RULES.json") as f:
     rules = json.load(f)
     races_raw = rules["races"]
     races_to_predict = [
@@ -15,7 +36,7 @@ with open("WIELERMANAGER_RULES.json") as f:
     ]
     points_per_race_type = rules["points_per_race"]
 
-with open("WIELERMANAGER_BUDGETS.json") as f:
+with open("wielermanager/WIELERMANAGER_BUDGETS.json") as f:
     budgets = json.load(f)
     riders_with_known_calender = budgets["riders_with_calender_known"]
 
@@ -42,6 +63,9 @@ def compute_rider_average_points():
         print(f"race: {race}")
         print(f"nr participants: {len(rider_percentages)}")
         print(rider_percentages.head(10))
+        rider_percentages.write_parquet(
+            f"data_v2/wielermanager/rider_percentages_{race}.parquet"
+        )
 
     pass
 
@@ -63,7 +87,7 @@ def convert_scores_to_points(race_type, scores_df, race):
         (pl.col("expected_points_overestimate") / pl.col("total_probability")).alias("expected_points")
     )#.select(["name", "expected_points"])
     # df = df.with_row_index("row_nr")
-
+    
     # Convert dict to DataFrame
 
     # Join
@@ -71,5 +95,5 @@ def convert_scores_to_points(race_type, scores_df, race):
     return rider_percentages_df
 
 if __name__ == "__main__":
-    get_startlists()
+    # get_startlists()
     compute_rider_average_points()

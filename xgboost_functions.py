@@ -23,7 +23,7 @@ from sklearn.metrics import ndcg_score
 import numpy as np
 
 
-with open("WIELERMANAGER_RULES.json") as f:
+with open("wielermanager/WIELERMANAGER_RULES.json") as f:
     rules = json.load(f)
 
 

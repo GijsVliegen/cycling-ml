@@ -742,6 +742,7 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     ]).sort("date")
     lf = bare_results.lazy()
 
+        #TODO: change offset - 1 int ooffset + 1? Is information leaking into features? especiallly for 40d window?
     for label, offset in windows.items():
         dfs.append(
             lf.with_columns(
