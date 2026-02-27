@@ -534,6 +534,7 @@ def create_new_race_data(race_name_stages: tuple[str, int]):
     all_startlists = []
     logs = []
     for soup, (race, stage, race_type) in zip(startlist_soups, race_name_stages):
+        print(f"parsing race {race}")
         startlist, team_list = parse_startlist_page(soup)
         race_df, race_logs = parse_new_races_to_dict(
             races = race_name_stages

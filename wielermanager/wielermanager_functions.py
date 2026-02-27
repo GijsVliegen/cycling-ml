@@ -74,7 +74,29 @@ def convert_scores_to_points(race_type, scores_df, race):
     
     #TODO: dont guesstimate temperature but minimize log loss on historical data to find best temperature for plackett-luce
 
-    rider_percentages_df = scores_to_probability_results(scores_df, max_rank_to_predict=30, temperature=0.05)
+    manually_boost_riders_list = [
+        "mathieu-van-der-poel",
+        "jasper-philipsen"
+    ]
+    manually_lower_riders_list = [
+        # "christophe-laporte",
+    ]
+    scores_df = scores_df.with_columns(
+        pl.when(pl.col("name").is_in(manually_boost_riders_list))
+            .then(pl.col("score") + 0.5)
+            .otherwise(pl.col("score")).alias("score")
+    ).sort("score", descending=True)
+    scores_df = scores_df.with_columns(
+        pl.when(pl.col("name").is_in(manually_lower_riders_list))
+            .then(pl.col("score") - 0.2)
+            .otherwise(pl.col("score")).alias("score")
+    ).sort("score", descending=True)
+    
+    rider_percentages_df = scores_to_probability_results(
+        scores_df, 
+        max_rank_to_predict=30, 
+        temperature=0.2
+    )
     rider_percentages_df = rider_percentages_df.with_columns(
         pl.sum_horizontal([
             pl.col(f"rank_{k}_prob") for k in range(1, len(points_per_rank) + 1)

@@ -7,7 +7,10 @@ import json
 # INPUTS
 # ==============================
 
-BUDGET = 120
+EMERGENCY_TRANSFERS = 3
+FREE_TRANSFERS = 3 - EMERGENCY_TRANSFERS
+# ET = EMERGENCY_TRANSFERS
+BUDGET = 120# - ((ET) * (ET + 1) // 2)  # adjust budget for emergency transfers, using triangular number cost
 TEAM_SIZE = 20
 TOP_K = 12
 
@@ -81,6 +84,9 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
     z = pulp.LpVariable.dicts("transfer_in",
                               [(r, t) for r in riders for t in races],
                               cat="Binary")
+    o = pulp.LpVariable.dicts("transfer_out",
+                              [(r, t) for r in riders for t in races],
+                              cat="Binary")
         # binary ladder: u[n] = 1 if extra_transfers == n
     u = pulp.LpVariable.dicts(
         "extra_transfer_choice",
@@ -114,13 +120,19 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
             continue
         for r in riders:
             # z=1 if rider enters squad at race t
+            # also a ridern needs to be going out if one is coming in, so we link to the previous race 
             model += z[(r, t)] >= x[(r, t)] - x[(r, f"race_{int(t.split('_')[1]) - 1}")]
-    free_transfers = 3  # total free transfers for the season
+            model += o[(r, t)] >= -x[(r, t)] + x[(r, f"race_{int(t.split('_')[1]) - 1}")]
+    free_transfers = FREE_TRANSFERS  # total free transfers for the season
 
     # total transfers across the season
     total_transfers_expr = pulp.lpSum(
         z[(r, t)] for r in riders for t in races if t != "race_1"
     )
+    total_outgoing_expr = pulp.lpSum(
+        o[(r, t)] for r in riders for t in races if t != "race_1"
+    )
+    model += total_transfers_expr == total_outgoing_expr  # ensure transfers in = transfers
 
     # extra transfers above the free ones
     #link to binary ladder
@@ -138,7 +150,7 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
         return n * (n + 1) // 2  # triangular numbers
 
     transfer_cost_expr = pulp.lpSum(replacement_cost(n) * u[n] for n in range(20))
-    model += pulp.lpSum(cost[r] * x[(r, "race_1")] for r in riders) + transfer_cost_expr <= BUDGET
+    model += pulp.lpSum(cost.get(r, 2) * x[(r, "race_1")] for r in riders) + transfer_cost_expr <= BUDGET
 
     # ===============================
     # CONSTRAINTS
@@ -149,8 +161,11 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
         # 20 riders
         model += pulp.lpSum(x[(r, t)] for r in riders) == TEAM_SIZE
 
+        # make sure to have enough budget for future transfers, not just current one
+        #TODO: how to?
+
         # budget
-        model += pulp.lpSum(cost[r] * x[(r, t)] for r in riders) <= BUDGET
+        model += pulp.lpSum(cost.get(r, 2) * x[(r, t)] for r in riders) <= BUDGET
 
         # 12 scoring
         model += pulp.lpSum(y[(r, t)] for r in riders) <= TOP_K
@@ -179,12 +194,19 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
     # transfers per race
     # transfers = {}
     total_transfers_so_far = 0
-    transfers = {
+    transfers_in = {
         r: t
         for t in races
         for r in riders 
         if z[(r, t)].value() is not None and z[(r, t)].value() > 0
     }
+    transfers_out = {
+        r: t
+        for t in races
+        for r in riders        
+        if o[(r, t)].value() is not None and o[(r, t)].value() > 0
+    }
+
     total_points = sum(
         expected_points[r][t] * y[(r, t)].value()
         for (r, t) in y
@@ -217,17 +239,22 @@ def solve_team_selection(race_dfs: list[pl.DataFrame], cost_df: pl.DataFrame):
                 for r in rider_points.keys()
             ],
         })
-        .join(cost_df, on="name", how="left")
+        .join(cost_df, on="name", how="left").fill_null(2)
         .sort("total_points", descending=True)
     )
-
+    total_cost_at_each_race = {
+        t: sum(cost.get(r, 2) * x[(r, t)].value() for r in riders)
+        for t in races
+    }
+    print(f"total_cost_at_each_race: {total_cost_at_each_race}")
 
     return {
         "initial_selected_riders": selected_riders,
         # "initial_cost": total_cost,
         "total_expected_points": total_points,
         "squads_per_race": squads,
-        "transfers": transfers,
+        "transfers_in": transfers_in,
+        "transfers_out": transfers_out,
         "rider_summary_df": result_df,
     }
 
@@ -248,13 +275,15 @@ def main():
     for race, stage, race_type in races_to_predict:
         race_prediction = pl.read_parquet(f"data_v2/wielermanager/rider_percentages_{race}.parquet")
         all_race_preds.append(race_prediction)
+
     rider_cost_df = create_rider_cost_df()
     solution_dict = solve_team_selection(
         race_dfs = all_race_preds, 
         cost_df = rider_cost_df
     )
     print("Selected Team:")
-    print(f"transfers: {solution_dict['transfers']}")
+    print(f"transfers in: {solution_dict['transfers_in']}")
+    print(f"transfers out: {solution_dict['transfers_out']}")
     print(f"rider summary: {solution_dict['rider_summary_df']}")
     print(solution_dict["initial_selected_riders"])
     print(f"Total Expected Points: {solution_dict['total_expected_points']}")
