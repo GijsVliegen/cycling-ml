@@ -9,8 +9,16 @@ from data_science_functions import (
 
 import numpy as np
 import xgboost as xgb
+from pathlib import Path
 
 from xgboost_functions import RaceModel
+
+
+DEFAULT_DATA_DIR = "data_v2"
+
+
+def data_path(data_dir: str, filename: str) -> str:
+    return str(Path(data_dir) / filename)
 
 def get_new_race_embedding(
     race_to_find_for: pl.DataFrame, 
@@ -403,16 +411,16 @@ def new_race_to_xgboost_format(
 
     return race_X
 
-def predict_race(startlist_df, race_stats_df):
+def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
     """Compute scores and perform exp them (for softmax later on in placket-luce)
     """
     
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
-    results_df = pl.read_parquet("data_v2/results_df.parquet")
-    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
+    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
+    results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet"))
+    riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
     
-    races_base_embedded_df = pl.read_parquet("data_v2/races_base_embedded_df.parquet")
-    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
+    races_base_embedded_df = pl.read_parquet(data_path(data_dir, "races_base_embedded_df.parquet"))
+    results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
     """Prepare data of race and riders to give to xgboost"""
     
     riders_yearly_data = riders_yearly_data.with_columns(
@@ -455,7 +463,7 @@ def predict_race(startlist_df, race_stats_df):
 
     """Use prepared data to generate inter-rider results"""
 
-    model = RaceModel()
+    model = RaceModel(data_dir=data_dir, test_mode=False)
     model.load_model()
 
     X = new_race_to_xgboost_format(
@@ -501,12 +509,13 @@ def predict_race(startlist_df, race_stats_df):
     return scores
 
 def main():
-    startlist_df = pl.read_parquet("data_v2/new_race_startlist.parquet")
-    race_stats_df = pl.read_parquet("data_v2/new_race_stats.parquet")
+    startlist_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "new_race_startlist.parquet"))
+    race_stats_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "new_race_stats.parquet"))
     """Prepare data of race and riders to give to xgboost"""
     predict_race(
         startlist_df = startlist_df,
-        race_stats_df = race_stats_df
+        race_stats_df = race_stats_df,
+        data_dir=DEFAULT_DATA_DIR,
     )
 
     # race_embedding = get_new_race_embedding(

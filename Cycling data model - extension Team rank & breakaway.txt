@@ -1,0 +1,32 @@
+Pass breakaway probability to model which should do everything with team rank included
+
+Overtrain the model on breakaway-won races Might be good
+
+Breakaway detection
+
+definition: Team rank for the race is 3/4? or higher and still a top 5 for atleast 3 -> hyperparameter
+
+train model with features 
+ - height and stuff, embedding
+ - > Chatgpt suggestion on new features: Strong crosswinds can split the peloton
+Rain makes racing more cautious
+Heat increases fatigue and reduces chase efficiency
+  -> Meer Chatgpt: 5. Difficult terrain helps
+
+	Certain stages favor breakaways:
+
+	Mountain stages → harder to organize a chase
+	Rolling/hilly stages → disrupts peloton rhythm
+	Technical descents → advantage for skilled riders
+	
+	Flat stages usually favor the peloton because teams can organize a chase more easily.
+ - stage nr
+
+Compare the detected breakaway Take this together with stage nr
+
+
+Team rank
+Take in
+ - race top-rank features over diff times
+ - take in proximity to race
+ - rankndcg the team against their relative positions in the results, with big weights on first ofcourse

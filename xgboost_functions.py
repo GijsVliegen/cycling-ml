@@ -6,6 +6,7 @@ import polars as pl
 import json
 import xgboost as xgb
 from typing import Tuple, Dict
+from pathlib import Path
 from sklearn.metrics import (
     confusion_matrix,
     classification_report,
@@ -27,12 +28,20 @@ with open("wielermanager/WIELERMANAGER_RULES.json") as f:
     rules = json.load(f)
 
 
+DEFAULT_DATA_DIR = "data_v2"
+DEFAULT_TEST_DATA_DIR = "data_test"
+
+
+def data_path(data_dir: str, filename: str) -> str:
+    return str(Path(data_dir) / filename)
+
+
 class RaceModel:
     """
     XGboost on pairs of riders predicting who will win
     """
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False) -> None:
         """
         Initializes the RaceModel model.
 
@@ -51,6 +60,8 @@ class RaceModel:
         # 0-4: name ┆ year ┆ score ┆ rank ┆ Onedayraces ┆ 
         # 5-9: GC ┆ TT ┆ Sprint ┆ Climber ┆ Hills
 
+        self.data_dir = data_dir
+        self.test_mode = test_mode
         self.embed_features = [
             f"embed_{i}"
             for i in range(1, EMBEDDING_SIZE+1)
@@ -93,16 +104,18 @@ class RaceModel:
         ] + self.embed_features
 
     def save_model(self, ndcg: bool = True, binary: bool = True) -> None:
+        models_dir = Path(self.data_dir) / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
         if ndcg:
-            self.bst.save_model("data_v2/models/xgboost_model.json")
+            self.bst.save_model(str(models_dir / "xgboost_model.json"))
         if binary:
-            self.bst_binary.save_model("data_v2/models/xgboost_model_binary_classifier.json")
+            self.bst_binary.save_model(str(models_dir / "xgboost_model_binary_classifier.json"))
 
     def load_model(self) -> None:
         self.bst = xgb.Booster()
-        self.bst.load_model("data_v2/models/xgboost_model.json")
+        self.bst.load_model(data_path(self.data_dir, "models/xgboost_model.json"))
         self.bst_binary = xgb.Booster()
-        self.bst_binary.load_model("data_v2/models/xgboost_model_binary_classifier.json")
+        self.bst_binary.load_model(data_path(self.data_dir, "models/xgboost_model_binary_classifier.json"))
 
 # region training models
         
@@ -134,7 +147,7 @@ class RaceModel:
             
         bst = xgb.train(
             dtrain = dtrain,
-            num_boost_round=200,
+            num_boost_round=40 if self.test_mode else 200,
             evals=[(dtrain, "train"), (dtest, "test")],
             params = {
                 # "objective": "reg:squarederror",
@@ -148,7 +161,7 @@ class RaceModel:
                 "max_depth": 6,
                 "tree_method": "hist",
                 # "max_bin": 3,
-                "early_stopping_rounds": 10,
+                "early_stopping_rounds": 5 if self.test_mode else 10,
                 "learning_rate": 0.1,   # ↓↓↓
                 "subsample": 0.5,
             },
@@ -201,7 +214,7 @@ class RaceModel:
             
         bst_binary = xgb.train(
             dtrain=dtrain,
-            num_boost_round=251,
+            num_boost_round=50 if self.test_mode else 251,
             evals=[(dtrain, "train"), (dtest, "test")],
             params={
                 "objective": "binary:logistic",
@@ -210,7 +223,7 @@ class RaceModel:
                 "min_child_weight": 10,
                 "max_depth": 6,
                 "tree_method": "hist",
-                "early_stopping_rounds": 10,
+                "early_stopping_rounds": 5 if self.test_mode else 10,
                 "learning_rate": 0.05,
                 "subsample": 0.5,
             },
@@ -221,6 +234,8 @@ class RaceModel:
         return
 
     def print_training_progress_binary(self, epochs, test_errors, train_errors):
+        if self.test_mode:
+            return
         plt.figure(figsize=(10, 6))
         plt.plot(epochs, test_errors, label='Test AUC', color='blue')
         plt.plot(epochs, train_errors, label='Train AUC', color='orange')
@@ -233,6 +248,8 @@ class RaceModel:
         return
 
     def print_training_progress(self, epochs, test_errors, train_errors):
+        if self.test_mode:
+            return
         plt.figure(figsize=(10, 6))
         plt.plot(epochs, test_errors, label='Test ndcg', color='blue')
         plt.plot(epochs, train_errors, label='Train ndcg', color='orange')
@@ -671,13 +688,15 @@ class RaceModel:
 
 def train(
     train_ndcg: bool = False,
-    train_binary: bool = False
+    train_binary: bool = False,
+    data_dir: str = DEFAULT_DATA_DIR,
+    test_mode: bool = False,
 ):
-    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
-    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
-    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    result_features_df = pl.read_parquet(data_path(data_dir, "result_features_df.parquet"))
+    results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
+    races_inference_embedded_df = pl.read_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
+    riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
+    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
 
 
     riders_yearly_data = riders_yearly_data.with_columns(
@@ -698,7 +717,7 @@ def train(
         on = ["race_id"],
         how="right"
     )
-    model = RaceModel()
+    model = RaceModel(data_dir=data_dir, test_mode=test_mode)
     model.train_model(
         result_features_df=results_features, 
         riders_yearly_data=riders_yearly_data, 
@@ -712,12 +731,12 @@ def train(
     )
 
 
-def evaluate():
-    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
-    results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
-    races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
-    riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
+def evaluate(data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False):
+    result_features_df = pl.read_parquet(data_path(data_dir, "result_features_df.parquet"))
+    results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
+    races_inference_embedded_df = pl.read_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
+    riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
+    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
     
     riders_yearly_data = riders_yearly_data.with_columns(
         pl.all().replace(-1, 0)
@@ -734,7 +753,7 @@ def evaluate():
         on = ["race_id"],
         how="right"
     )
-    model = RaceModel()
+    model = RaceModel(data_dir=data_dir, test_mode=test_mode)
     model.load_model()
 
     """Evaluate model"""
@@ -790,7 +809,7 @@ def minimize_logloss():
     races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     races_df = pl.read_parquet("data_v2/races_df.parquet")
-    
+    breakpoint()
     riders_yearly_data = riders_yearly_data.with_columns(
         pl.all().replace(-1, 0)
     )
@@ -887,13 +906,23 @@ def optimize_weighted_points(scores1, scores2, y_true_rank, test_groups, points_
     return {'w1': best[0], 'w2': best[1], 'max_points': best[2]}
     # return {'w1': w1, 'w2': w2, 'max_points': max_points}
 
-def main():
+def main(data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False):
     train(
         train_ndcg=True,
-        train_binary=True
+        train_binary=True,
+        data_dir=data_dir,
+        test_mode=test_mode,
     )
-    evaluate()
+    evaluate(data_dir=data_dir, test_mode=test_mode)
     # minimize_logloss()
+
+
+def main_test(data_dir: str = DEFAULT_TEST_DATA_DIR):
+    main(data_dir=data_dir, test_mode=True)
+    return {
+        "data_dir": data_dir,
+        "model_dir": data_path(data_dir, "models"),
+    }
 
 if __name__ == "__main__":
     main()

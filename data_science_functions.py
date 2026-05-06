@@ -8,6 +8,7 @@ import hashlib
 import itertools
 from pprint import pprint
 from typing import List, Dict
+from pathlib import Path
 
 from sklearn.discriminant_analysis import StandardScaler
 
@@ -49,6 +50,18 @@ from sklearn.discriminant_analysis import StandardScaler
 """
 
 EMBEDDING_SIZE = 10 
+DEFAULT_DATA_DIR = "data_v2"
+DEFAULT_TEST_DATA_DIR = "data_test"
+
+
+def data_path(data_dir: str, filename: str) -> str:
+    return str(Path(data_dir) / filename)
+
+
+def ensure_data_dir(data_dir: str) -> Path:
+    path = Path(data_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalized_races_df: pl.DataFrame, k = 5) -> pl.DataFrame:
     """
@@ -455,7 +468,8 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     ]
     windows = {
         "1110d": 1110,
-        # "370d": 370,
+        "370d": 370,
+        "40d": 40,
     }
     rank_thresholds = [
         25,
@@ -467,7 +481,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
     #create buckets:
     races_bucketed = races.with_columns(
         [
-            pl.col(c).qcut(3, labels=["1", "2", "3"]).alias(f"{c}_bucket").cast(pl.Categorical)
+            pl.col(c).qcut(3, labels=["1", "2", "3"], allow_duplicates=True).alias(f"{c}_bucket").cast(pl.Categorical)
             for c in race_features_to_bucket_on
         ]
     )
@@ -476,11 +490,37 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         races_bucketed,
         on = "race_id",
         how= "inner"
+    ).with_columns(
+        pl.col("rank").cast(pl.Float64, strict=False).alias("rank")
+    ).with_columns(
+        (pl.col("rank") > 0).alias("is_classified"),
+    ).with_columns(
+        pl.when(
+            pl.col("team").is_not_null() &
+            (pl.col("team") != "") &
+            pl.col("is_classified")
+        ).then(
+            pl.col("rank").rank("ordinal").over(["race_id", "team"])
+        ).otherwise(
+            None
+        ).alias("team_rank")
+    ).with_columns(
+        (
+            pl.col("is_classified") &
+            (
+                (pl.col("rank") <= 25) |
+                (pl.col("team_rank") <= 3)
+            )
+        ).alias("is_qualifying_participation")
+    ).filter(
+        pl.col("is_qualifying_participation")
+    ).unique(
+        subset=["race_id", "name"]
     )
     feature_creation_expressions = [
         # pl.when(pl.col("top_25_count").is_null() | (pl.col("top_25_count") == 0)).then(0).otherwise
         (
-            (pl.col(f"{bucket_feature}_bucket") == bucket).sum()
+            ((pl.col("rank") <= rank_threshold) & (pl.col(f"{bucket_feature}_bucket") == bucket)).sum()
             / (pl.len())
         )
         .alias(f"top_{rank_threshold}_in_{bucket_feature}_{bucket}")
@@ -495,7 +535,9 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
             for label, offset in windows.items()
         ]
     ).drop(
-        "rank",
+        "is_classified",
+        "team_rank",
+        "is_qualifying_participation",
         "specialty",
         "team",
         "age",
@@ -538,7 +580,7 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
                 feature_creation_expressions
             ).rename({
                 f"_window_date_{label}": "date"
-            }).collect(streaming=True)
+            }).collect(engine="streaming")
         window_lf = window_lf.rename({
             col: f"f{col}_{label}"
             for col in window_lf.columns
@@ -769,7 +811,7 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
                 pl.col("points").sum().alias(f"strength_{label}"),
             )
             .rename({f"_window_date_{label}": "date"})
-            .collect(streaming=True)
+            .collect(engine="streaming")
         )
     
     for d in dfs:
@@ -872,15 +914,81 @@ def check_rider_stats():
     pass
 
 def create_normalized_race_data():
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
-    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    races_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "races_df.parquet"))
+    results_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "results_df.parquet")).filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
     necessary_races = races_df.filter(
         pl.col("startlist_score") > 100
     )
     # results_similarity = create_results_similarity(results_df)
     interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
-    normalized_races_df.write_parquet("data_v2/normalized_races_df.parquet")
+    normalized_races_df.write_parquet(data_path(DEFAULT_DATA_DIR, "normalized_races_df.parquet"))
+
+
+def create_normalized_race_data_for_dir(data_dir: str = DEFAULT_DATA_DIR):
+    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
+    results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet")).filter(pl.col("rank") != -1)
+    necessary_races = races_df.filter(
+        pl.col("startlist_score") > 100
+    )
+    interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
+    normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
+    normalized_races_df.write_parquet(data_path(data_dir, "normalized_races_df.parquet"))
+    return normalized_races_df
+
+
+def prepare_test_data(
+    source_dir: str = DEFAULT_DATA_DIR,
+    target_dir: str = DEFAULT_TEST_DATA_DIR,
+    max_races_per_year: int = 20,
+    nr_years: int = 7,
+) -> dict:
+    ensure_data_dir(target_dir)
+    races_df = pl.read_parquet(data_path(source_dir, "races_df.parquet"))
+    results_df = pl.read_parquet(data_path(source_dir, "results_df.parquet"))
+    riders_yearly_data = pl.read_parquet(data_path(source_dir, "rider_yearly_stats_df.parquet"))
+
+    available_years = (
+        races_df.select(pl.col("year").cast(pl.Int64).alias("year"))
+        .unique()
+        .sort("year")
+        .to_series()
+        .to_list()
+    )
+    selected_years = available_years[-nr_years:]
+    selected_years_str = [str(year) for year in selected_years]
+
+    selected_races = (
+        races_df
+        .filter(pl.col("year").is_in(selected_years_str))
+        .filter(pl.col("stage").is_null())
+        .filter(pl.col("startlist_score") > 100)
+        .sort(["year", "startlist_score"], descending=[False, True])
+        .group_by("year")
+        .head(max_races_per_year)
+    )
+    selected_results = results_df.join(
+        selected_races.select("race_id"),
+        on="race_id",
+        how="inner"
+    )
+    selected_riders = selected_results.select("name").unique()
+    selected_rider_yearly_data = riders_yearly_data.join(
+        selected_riders,
+        on="name",
+        how="inner"
+    )
+
+    selected_races.write_parquet(data_path(target_dir, "races_df.parquet"))
+    selected_results.write_parquet(data_path(target_dir, "results_df.parquet"))
+    selected_rider_yearly_data.write_parquet(data_path(target_dir, "rider_yearly_stats_df.parquet"))
+
+    return {
+        "years": selected_years,
+        "nr_races": selected_races.height,
+        "nr_results": selected_results.height,
+        "nr_riders": selected_riders.height,
+    }
 
 def filter_data(
         races_df: pl.DataFrame, 
@@ -905,15 +1013,15 @@ def filter_data(
     )
     return necessary_races, necessary_results
 
-def main():
+def main(data_dir: str = DEFAULT_DATA_DIR):
     """create features dataframe"""
     pl.Config.set_tbl_cols(-1)
 
-    results_df = pl.read_parquet("data_v2/results_df.parquet").filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    races_df = pl.read_parquet("data_v2/races_df.parquet")
+    results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet")).filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
     necessary_races, necessary_results = filter_data(races_df, results_df, feature_creation=True)
 
-    normalized_races_df = pl.read_parquet("data_v2/normalized_races_df.parquet")
+    normalized_races_df = pl.read_parquet(data_path(data_dir, "normalized_races_df.parquet"))
     # races_features_df = create_race_features_table(
     #     races=races_df, 
     #     results=results_df,
@@ -967,16 +1075,46 @@ def main():
         results_embedded_df=results_embedded_df,
         races_embedded_df=races_inference_embedded_df,
     )
-    # print(result_features_df.columns)
-    # print(len(result_features_df.columns))
-    # print(result_features_df)
+    print(result_features_df.columns)
+    print(len(result_features_df.columns))
+    print(result_features_df)
+    breakpoint()
     
-    pre_embed_features_df.write_parquet("data_v2/pre_embed_features_df.parquet")
-    result_features_df.write_parquet("data_v2/result_features_df.parquet")
+    pre_embed_features_df.write_parquet(data_path(data_dir, "pre_embed_features_df.parquet"))
+    result_features_df.write_parquet(data_path(data_dir, "result_features_df.parquet"))
+    breakpoint()
 
-    results_embedded_df.write_parquet("data_v2/results_embedded_df.parquet")
-    races_base_embedded_df.write_parquet("data_v2/races_base_embedded_df.parquet")
-    races_inference_embedded_df.write_parquet("data_v2/races_inference_embedded_df.parquet")
+    results_embedded_df.write_parquet(data_path(data_dir, "results_embedded_df.parquet"))
+    races_base_embedded_df.write_parquet(data_path(data_dir, "races_base_embedded_df.parquet"))
+    races_inference_embedded_df.write_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
+    breakpoint()
+    return {
+        "result_features_rows": result_features_df.height,
+        "pre_embed_rows": pre_embed_features_df.height,
+        "results_embedded_rows": results_embedded_df.height,
+    }
+
+
+def main_test(
+    source_dir: str = DEFAULT_DATA_DIR,
+    target_dir: str = DEFAULT_TEST_DATA_DIR,
+    max_races_per_year: int = 20,
+    nr_years: int = 7,
+):
+    ensure_data_dir(target_dir)
+    subset_summary = prepare_test_data(
+        source_dir=source_dir,
+        target_dir=target_dir,
+        max_races_per_year=max_races_per_year,
+        nr_years=nr_years,
+    )
+    create_normalized_race_data_for_dir(target_dir)
+    feature_summary = main(data_dir=target_dir)
+    return {
+        "subset": subset_summary,
+        "features": feature_summary,
+        "data_dir": target_dir,
+    }
 
 def assert_embedding_dimension():
     pre_embed_features_df = pl.read_parquet("data_v2/pre_embed_features_df.parquet")
@@ -999,7 +1137,7 @@ def assert_embedding_similarity():
 if __name__ == "__main__":
     create_normalized_race_data()
     main()
-    assert_embedding_dimension()
+    # assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()
     # check_races_stats()
