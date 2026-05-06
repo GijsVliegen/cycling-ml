@@ -4,30 +4,28 @@ import pulp
 import json
 from pathlib import Path
 
+from wielermanager.race_config import (
+    load_race_manifest,
+    load_wielermanager_rules,
+    resolve_races_to_predict,
+)
+
 # ==============================
 # INPUTS
 # ==============================
 
 EMERGENCY_TRANSFERS = 3
-FREE_TRANSFERS = 3# EMERGENCY_TRANSFERS take away one from free, and 2 costly additionally
-# ET = EMERGENCY_TRANSFERS
-BUDGET = 120# - ((ET) * (ET + 1) // 2)  # adjust budget for emergency transfers, using triangular number cost
-TEAM_SIZE = 20
+FREE_TRANSFERS = 3 - EMERGENCY_TRANSFERS
+BUDGET = 100# - ((ET) * (ET + 1) // 2)  # adjust budget for emergency transfers, using triangular number cost
+TEAM_SIZE = 16
 TOP_K = 12
 
+rules = load_wielermanager_rules()
+points_per_race_type = rules["points_per_race"]
 
-with open("wielermanager/WIELERMANAGER_RULES.json") as f:
-    rules = json.load(f)
-    races_raw = rules["races"]
-    races_to_predict = [
-        (raw_race["pcs_name"], -1, raw_race["type"])
-        for raw_race in races_raw
-    ]
-    points_per_race_type = rules["points_per_race"]
-
-with open("wielermanager/WIELERMANAGER_BUDGETS.json") as f:
+with open("wielermanager/WIELERMANAGER_BUDGETS_giro_2026.json") as f:
     budgets = json.load(f)
-    riders_with_known_calender = budgets["riders_with_calender_known"]
+    # riders_with_known_calender = budgets["riders_with_calender_known"]
     budgets_list = budgets["budgets"]
 
 
@@ -39,9 +37,16 @@ def data_path(data_dir: str, filename: str) -> str:
     return str(Path(data_dir) / filename)
 
 
+def get_races_to_predict(data_dir: str = DEFAULT_DATA_DIR, year: int = 2026):
+    manifest_races = load_race_manifest(data_dir)
+    if manifest_races is not None:
+        return manifest_races
+    return resolve_races_to_predict(rules, default_year=year)
+
+
 def get_available_prediction_races(data_dir: str = DEFAULT_DATA_DIR, limit: int | None = None):
     available = []
-    for race, stage, race_type in races_to_predict:
+    for race, stage, race_type in get_races_to_predict(data_dir=data_dir):
         prediction_path = Path(data_path(data_dir, f"wielermanager/rider_percentages_{race}.parquet"))
         if prediction_path.exists():
             available.append((race, stage, race_type))
@@ -721,8 +726,8 @@ def solve_team_selection(
         t: [r for r in riders if y[(r, t)].value() == 1]
         for t in races
     }
-    print(f"DEBUG")
-    print(f"nr of registered transfers at each point:")
+    print("DEBUG")
+    print("nr of registered transfers at each point:")
     for race_name in races:
         for transfer_nr in range(20):
             if (race_name, transfer_nr) in nr_transfers_exact_n_at_t and nr_transfers_exact_n_at_t[(race_name, transfer_nr)].value() == 1:

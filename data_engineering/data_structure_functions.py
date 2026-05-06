@@ -1,4 +1,6 @@
 
+from pathlib import Path
+
 import polars as pl
 
 try:
@@ -398,13 +400,14 @@ def parse_races_to_polars(year: int, already_in_polars: list[tuple[str, str]]) -
 
     return races_df, results_df, logs
 
-def parse_new_races_to_dict(races: list[tuple[str, int, str]]) -> tuple[dict, list[str]]:
+def parse_new_races_to_dict(races: list[tuple[str, int, str]], year: int = 2026) -> tuple[dict | None, list[str]]:
     logs = []
+    race_df = None
     for race_name, stage_nr, race_type in races:
         if stage_nr > 0:
-            race_url = f"{BASE_URL}/race/{race_name}/2026/stage-{stage_nr}"
+            race_url = f"{BASE_URL}/race/{race_name}/{year}/stage-{stage_nr}"
         else:
-            race_url = f"{BASE_URL}/race/{race_name}/2026/result"
+            race_url = f"{BASE_URL}/race/{race_name}/{year}/result"
     
         tail = race_url.split("/")[-1]
         race_soup = load_soups_from_http(race_url)[0]
@@ -481,14 +484,19 @@ def make_races_results_df():
     return logs
 
 def make_riders_stats_df():
-    # current_rider_stats_df = pl.read_parquet("data_v2/rider_stats_df.parquet")
+    rider_stats_path = Path("data_v2/rider_stats_df.parquet")
+    if rider_stats_path.exists():
+        current_rider_stats_df = pl.read_parquet(str(rider_stats_path))
+    else:
+        current_rider_stats_df = pl.DataFrame({"name": []})
+
     current_rider_yearly_stats_df = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
     logs = []
     all_rider_stats_df, all_rider_yearly_stats_df, parse_logs = parse_riders_to_polars()
     logs.extend(parse_logs)
-    # current_rider_stats_df = pl.concat([current_rider_stats_df, all_rider_stats_df]).unique(subset=["name"])
+    current_rider_stats_df = pl.concat([current_rider_stats_df, all_rider_stats_df], how="diagonal_relaxed").unique(subset=["name"])
     current_rider_yearly_stats_df = pl.concat([current_rider_yearly_stats_df, all_rider_yearly_stats_df]).unique(subset=["name", "season"])
-    # current_rider_stats_df.write_parquet("data_v2/rider_stats_df.parquet")
+    current_rider_stats_df.write_parquet("data_v2/rider_stats_df.parquet")
     current_rider_yearly_stats_df.write_parquet("data_v2/rider_yearly_stats_df.parquet")
 
     return logs
@@ -524,27 +532,39 @@ def get_missing_races_overview(year: int):
     print(f"Number of races in index for year {year}: {nr_of_races_in_index}")
     print(f"Number of races in races df for year {year}: {len(races_in_races_df)}") 
 
-def create_new_race_data(race_name_stages: tuple[str, int]):
+def create_new_race_data(
+    race_name_stages: list[tuple[str, int, str]],
+    data_dir: str = "data_v2",
+    year: int = 2026,
+):
+    def get_source_race_name(race_key: str) -> str:
+        return race_key.split("__", 1)[0]
+
+    output_dir = Path(data_dir) / "wielermanager"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     startlist_urls = [
-        f"{BASE_URL}/race/{race}/2026/startlist"
+        f"{BASE_URL}/race/{get_source_race_name(race)}/{year}/startlist"
         for (race, stage, race_type) in race_name_stages
     ]
 
     startlist_soups = load_soups_from_http(startlist_urls)
-    all_startlists = []
     logs = []
     for soup, (race, stage, race_type) in zip(startlist_soups, race_name_stages):
         print(f"parsing race {race}")
         startlist, team_list = parse_startlist_page(soup)
         race_df, race_logs = parse_new_races_to_dict(
-            races = race_name_stages
+            races=[(get_source_race_name(race), stage, race_type)],
+            year=year,
         )
         logs.append(race_logs)
+        if race_df is None:
+            continue
         startlist_df = pl.DataFrame(startlist)
-        startlist_df.write_parquet(f"data_v2/wielermanager/startlist_{race}.parquet")
-        race_df.write_parquet(f"data_v2/wielermanager/new_race_stats_{race}.parquet")
+        startlist_df.write_parquet(output_dir / f"startlist_{race}_{stage}.parquet")
+        race_df.write_parquet(output_dir / f"new_race_stats_{race}_{stage}.parquet")
     return logs
-
+        
 def main_new():
     """Get data for prediction of future race"""
     races = [("omloop-het-nieuwsblad", -1)]
@@ -567,8 +587,8 @@ def main():
     #     more_logs = download_year_races(i, downloaded_races)
     #     logs += more_logs
 
-    more_logs = make_races_results_df()
-    logs += more_logs
+    # more_logs = make_races_results_df()
+    # logs += more_logs
     
     # more_logs = download_rider_pages()
     # logs += more_logs

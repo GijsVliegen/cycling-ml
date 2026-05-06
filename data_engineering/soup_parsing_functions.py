@@ -2,6 +2,7 @@ import asyncio
 from http import client
 import httpx
 from bs4 import BeautifulSoup
+from datetime import date, datetime
 from urllib.parse import urljoin
 from tqdm.asyncio import tqdm
 import polars as pl
@@ -338,6 +339,54 @@ def parse_rider_page(soup) -> dict:
             a_tag = name_div.find('a')
             href = a_tag['href'] if a_tag else None
             team_name = href.split("/")[-1] if href else None
+
+    def parse_birth_date(raw_text: str) -> date | None:
+        cleaned = raw_text.split("(")[0].strip()
+        cleaned = cleaned.replace(",", "")
+        formats = [
+            "%d %B %Y",
+            "%B %d %Y",
+            "%Y-%m-%d",
+            "%d-%m-%Y",
+        ]
+        for fmt in formats:
+            try:
+                return datetime.strptime(cleaned, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    def parse_numeric_measure(raw_text: str) -> float | None:
+        cleaned = raw_text.replace(",", ".")
+        match = re.search(r"(\d+(?:\.\d+)?)", cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    birth_date = None
+    height = None
+    weight = None
+    for li in soup.select("ul.list li"):
+        title_div = li.find("div", class_="title")
+        value_div = li.find("div", class_="value")
+        if not title_div or not value_div:
+            continue
+        label = title_div.get_text(" ", strip=True).lower().rstrip(":")
+        value_text = value_div.get_text(" ", strip=True)
+        if "date of birth" in label:
+            birth_date = parse_birth_date(value_text)
+        elif "height" in label:
+            height = parse_numeric_measure(value_text)
+        elif "weight" in label:
+            weight = parse_numeric_measure(value_text)
+
+    current_age = None
+    if birth_date is not None:
+        days_old = (date.today() - birth_date).days
+        current_age = round(days_old / 365.25, 4)
     
 
     # Specialties
@@ -351,6 +400,10 @@ def parse_rider_page(soup) -> dict:
                 spec = xtitle.get_text(strip=True)
                 score = int(xvalue.get_text(strip=True))
                 specialties[spec] = score
+        specialties["date_of_birth"] = birth_date.isoformat() if birth_date is not None else None
+        specialties["age"] = current_age
+        specialties["height"] = height
+        specialties["weight"] = weight
         return specialties, team_name  
     else:
         raise RuntimeError("Could not find specialties list")

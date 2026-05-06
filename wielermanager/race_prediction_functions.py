@@ -12,6 +12,7 @@ import xgboost as xgb
 from pathlib import Path
 
 from xgboost_functions import RaceModel
+from xgboost_functions import load_rider_personal_data
 
 
 DEFAULT_DATA_DIR = "data_v2"
@@ -372,6 +373,7 @@ def add_embedding_similarity_for_new_race(
 def new_race_to_xgboost_format(
     rider_features_df: pl.DataFrame, 
     riders_yearly_data: pl.DataFrame,
+    riders_personal_data: pl.DataFrame,
     new_race_features: pl.DataFrame,
 ) -> np.ndarray:
     assert new_race_features.shape[0] == 1
@@ -380,32 +382,19 @@ def new_race_to_xgboost_format(
     race_id: int = new_race_features.select(
         ["race_id"] 
     ).unique().to_series().to_list()[0] #Take race_ids from results since only care about races with results
-
-    # rider_pairs = get_rider_pairs(
-    #     result_features_df = rider_features_df,
-    #     race_id = new_race_features.select("race_id").to_numpy()[0][0]
-    # )
-
-    # ordering = np.array([1] * len(rider_pairs))
     
     riders_features, rider_embeddings, _ = mock_model.get_rider_feats(
         race_results = rider_features_df,
         riders_yearly_data = riders_yearly_data,
+        riders_personal_data = riders_personal_data,
         race_id = race_id,
         race_year=2026,
         ranks=False
     )
 
-    # race_features = new_race_features.filter(
-    #     pl.col("race_id") == race_id
-    # ).select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
 
     race_features = new_race_features.select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
-    # race_embeddings = new_race_features.select(mock_model.embed_features).to_numpy()[0].astype(np.float32, copy=False)
     race_features = np.tile(race_features, (len(riders_features), 1))
-    # race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
-            
-    # embedding_diff = np.abs(rider_embeddings - race_embeddings)
 
     race_X = np.hstack([riders_features, race_features]) #, embedding_dff])
 
@@ -418,6 +407,7 @@ def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
     races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
     results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
+    riders_personal_data = load_rider_personal_data(data_dir)
     
     races_base_embedded_df = pl.read_parquet(data_path(data_dir, "races_base_embedded_df.parquet"))
     results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
@@ -469,43 +459,14 @@ def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
     X = new_race_to_xgboost_format(
         rider_features_df=rider_feats, 
         riders_yearly_data=riders_yearly_data, 
+        riders_personal_data=riders_personal_data,
         new_race_features = race_feats 
     )
-    # riders = set(
-    #     [rider for pair in pairs for rider in pair]
-    # )
-    # rider_scores = {
-    #     rider: [] for rider in riders
-    # }
-
     dtest = xgb.DMatrix(X)
     y_pred = model.bst.predict(dtest)
     scores = rider_feats.select("name").with_columns(
         pl.Series(y_pred).alias("score")
     ).sort("score", descending=True)
-    # print(scores.head(10))
-    # breakpoint()
-    # order = np.argsort(-y_pred)
-    # ranked_ids = names[order]
-    # ranked_scores = y_pred[order]
-    # for (first, second), pred_y, x, order in zip(pairs, y_pred_proba, X, ordering):
-    #     if order == 1:
-    #         rider_scores[first].append(pred_y)
-    #         rider_scores[second].append( - pred_y)
-    #     else:
-    #         rider_scores[first].append( - pred_y)
-    #         rider_scores[second].append(pred_y)
-    # rider_scores = {
-    #     rider: np.sum(scores) for rider, scores in rider_scores.items()
-    # }
-    # rider_scores_df = pl.DataFrame(
-    #     list(rider_scores.items()), schema=["name", "score"]
-    # )    
-    # rider_percentages_df = scores_to_probability_results(rider_scores_df)
-
-    # top10 = sorted(rider_scores.items(), key=lambda x: x[1], reverse=True)[:10]
-    # for name, score in top10:
-    #     print(f"{name}: {score:.4f}")
     return scores
 
 def main():
@@ -517,73 +478,6 @@ def main():
         race_stats_df = race_stats_df,
         data_dir=DEFAULT_DATA_DIR,
     )
-
-    # race_embedding = get_new_race_embedding(
-    #     race_to_find_for = race_stats_df,
-    #     old_embeddings = races_embedded_df,
-    #     old_races = necessary_races,
-    # )
-    # race_feats = race_embedding.join(
-    #     race_stats_df,
-    #     on = ["race_id"],
-    #     how="left"
-    # )
-    # rider_feats = get_rider_features(
-    #     new_race=race_stats_df,
-    #     startlist=startlist_df,
-    #     results = necessary_results,
-    #     races=necessary_races
-    # )
-    # rider_embeddings = get_rider_embeddings(
-    #     startlist = startlist_df,
-    #     results_embedded_df = results_embedded_df
-    # )
-    # rider_embeddings = add_embedding_similarity_for_new_race(
-    #     rider_embeddings=rider_embeddings,
-    #     race_embedding=race_embedding,
-    # )
-    # rider_feats = rider_feats.join(
-    #     rider_embeddings,
-    #     on="name"
-    # )
-
-    # """Use prepared data to generate inter-rider results"""
-
-    # model = RaceModel()
-    # model.load_model()
-
-    # X, Y, pairs = new_race_to_xgboost_format(
-    #     rider_features_df=rider_feats, 
-    #     riders_yearly_data=riders_yearly_data, 
-    #     new_race_features = race_feats 
-    # )
-    # riders = set(
-    #     [rider for pair in pairs for rider in pair]
-    # )
-    # rider_scores = {
-    #     rider: [] for rider in riders
-    # }
-
-    # dtest = xgb.DMatrix(X, label=Y)
-    # y_pred_proba = model.bst.predict(dtest)#, output_margin=True)
-    # for (first, second), pred_y, y in zip(pairs, y_pred_proba, Y):
-    #     if y == 1:
-    #         rider_scores[first].append(pred_y)
-    #         rider_scores[second].append( - pred_y)
-    #     else:
-    #         rider_scores[first].append( - pred_y)
-    #         rider_scores[second].append(pred_y)
-    # rider_scores = {
-    #     rider: np.sum(scores) for rider, scores in rider_scores.items()
-    # }
-    # rider_scores_df = pl.DataFrame(
-    #     list(rider_scores.items()), schema=["name", "score"]
-    # )    
-    # rider_percentages_df = scores_to_probability_results(rider_scores_df)
-    # top10 = sorted(rider_scores.items(), key=lambda x: x[1], reverse=True)[:10]
-    #     # Print nicely
-    # for name, score in top10:
-    #     print(f"{name}: {score:.4f}")
     return
 
 

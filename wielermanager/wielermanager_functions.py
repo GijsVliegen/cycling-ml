@@ -1,42 +1,22 @@
-import json
 import polars as pl
 from pathlib import Path
 
-# try:
-# # Try imports for when running from root directory
-# from data_engineering.data_cleaning_functions import filter_results, filter_stats
-# from data_engineering.soup_parsing_functions import (
-#     get_race_profile_url,
-#     parse_calendar_page,
-#     parse_gc_page,
-#     parse_race_page,
-#     parse_race_profile_page,
-#     parse_race_result_page,
-#     parse_rider_page,
-#     parse_rider_statistics_page,
-#     parse_startlist_page
-# )
-# from data_engineering.selenium_webscraping import (
-#     load_soup_from_file,
-#     download_page,
-#     load_soups_from_http,
-#     url_to_filename
-# )
 from data_engineering.data_structure_functions import create_new_race_data
 from wielermanager.race_prediction_functions import predict_race
+from wielermanager.race_config import (
+    load_race_manifest,
+    load_wielermanager_rules,
+    resolve_races_to_predict,
+    write_race_manifest,
+)
 from data_science_functions import scores_to_probability_results
 
-with open("wielermanager/WIELERMANAGER_RULES.json") as f:
-    rules = json.load(f)
-    races_raw = rules["races"]
-    races_to_predict = [
-        (raw_race["pcs_name"], -1, raw_race["type"]) for raw_race in races_raw
-    ]
-    points_per_race_type = rules["points_per_race"]
+rules = load_wielermanager_rules()
+points_per_race_type = rules["points_per_race"]
 
-with open("wielermanager/WIELERMANAGER_BUDGETS.json") as f:
-    budgets = json.load(f)
-    riders_with_known_calender = budgets["riders_with_calender_known"]
+# with open("wielermanager/WIELERMANAGER_BUDGETS.json") as f:
+#     budgets = json.load(f)
+#     riders_with_known_calender = budgets["riders_with_calender_known"]
 
 
 DEFAULT_DATA_DIR = "data_v2"
@@ -53,11 +33,18 @@ def ensure_wielermanager_dir(data_dir: str) -> Path:
     return target
 
 
+def get_races_to_predict(data_dir: str = DEFAULT_DATA_DIR, year: int = 2026):
+    manifest_races = load_race_manifest(data_dir)
+    if manifest_races is not None:
+        return manifest_races
+    return resolve_races_to_predict(rules, default_year=year)
+
+
 def get_available_races(data_dir: str = DEFAULT_DATA_DIR, limit: int | None = None):
     available = []
-    for race, stage, race_type in races_to_predict:
-        startlist_path = Path(data_path(data_dir, f"wielermanager/startlist_{race}.parquet"))
-        stats_path = Path(data_path(data_dir, f"wielermanager/new_race_stats_{race}.parquet"))
+    for race, stage, race_type in get_races_to_predict(data_dir=data_dir):
+        startlist_path = Path(data_path(data_dir, f"wielermanager/startlist_{race}_{stage}.parquet"))
+        stats_path = Path(data_path(data_dir, f"wielermanager/new_race_stats_{race}_{stage}.parquet"))
         if startlist_path.exists() and stats_path.exists():
             available.append((race, stage, race_type))
     if limit is not None:
@@ -72,19 +59,23 @@ def prepare_test_race_data(
 ):
     ensure_wielermanager_dir(target_dir)
     selected_races = get_available_races(source_dir, limit=limit)
-    for race, _, _ in selected_races:
-        pl.read_parquet(data_path(source_dir, f"wielermanager/startlist_{race}.parquet")).write_parquet(
-            data_path(target_dir, f"wielermanager/startlist_{race}.parquet")
+    for race, stage, _ in selected_races:
+        pl.read_parquet(data_path(source_dir, f"wielermanager/startlist_{race}_{stage}.parquet")).write_parquet(
+            data_path(target_dir, f"wielermanager/startlist_{race}_{stage}.parquet")
         )
-        pl.read_parquet(data_path(source_dir, f"wielermanager/new_race_stats_{race}.parquet")).write_parquet(
-            data_path(target_dir, f"wielermanager/new_race_stats_{race}.parquet")
+        pl.read_parquet(data_path(source_dir, f"wielermanager/new_race_stats_{race}_{stage}.parquet")).write_parquet(
+            data_path(target_dir, f"wielermanager/new_race_stats_{race}_{stage}.parquet")
         )
     return selected_races
 
 
-def get_startlists():
-    logs = create_new_race_data(races_to_predict)
+def get_startlists(data_dir: str = DEFAULT_DATA_DIR, year: int = 2026):
+    ensure_wielermanager_dir(data_dir)
+    races_to_predict = resolve_races_to_predict(rules, default_year=year)
+    write_race_manifest(data_dir, races_to_predict)
+    logs = create_new_race_data(races_to_predict, data_dir=data_dir, year=year)
     print(logs)
+    return races_to_predict
 
 
 
@@ -97,10 +88,10 @@ def compute_rider_average_points(
         selected_races = get_available_races(data_dir)
     for race, stage, race_type in selected_races:
         startlist_df = pl.read_parquet(
-            data_path(data_dir, f"wielermanager/startlist_{race}.parquet")
+            data_path(data_dir, f"wielermanager/startlist_{race}_{stage}.parquet")
         )
         race_stats_df = pl.read_parquet(
-            data_path(data_dir, f"wielermanager/new_race_stats_{race}.parquet")
+            data_path(data_dir, f"wielermanager/new_race_stats_{race}_{stage}.parquet")
         )
         print(f"startlist length = {len(startlist_df)}")
         scores = predict_race(startlist_df=startlist_df, race_stats_df=race_stats_df, data_dir=data_dir)
@@ -122,20 +113,8 @@ def convert_scores_to_points(race_type, scores_df, race):
     # TODO: dont guesstimate temperature but minimize log loss on historical data to find best temperature for plackett-luce
 
     manually_boost_riders_list = [
-        "mathieu-van-der-poel",
-        "matthew-brennan",
-        "paul-sexais",
-        "tobias-halland-johannessen",
-        "matteo-jorgenson"
-        # "jasper-philipsen"
     ]
     manually_lower_riders_list = [
-        "julian-alaphilippe",
-        "domen-novak",
-        "tim-wellens", #out
-        "oscar-riesebeek",
-        "hugo-de-la-calle-arango",
-        "alessandro-covi"
     ]
     scores_df = scores_df.with_columns(
         pl.when(pl.col("name").is_in(manually_boost_riders_list))
@@ -157,9 +136,6 @@ def convert_scores_to_points(race_type, scores_df, race):
         pl.sum_horizontal(
             [pl.col(f"rank_{k}_prob") for k in range(1, len(points_per_rank) + 1)]
         ).alias("total_probability"),
-        # pl.sum_horizontal([
-        #     pl.col(f"rank_{k}_prob") for k in range(1, 7)
-        # ]).alias("total_probability_kopman"),
         pl.sum_horizontal(
             [
                 pl.col(f"rank_{k}_prob") * points_per_rank[str(k)]
@@ -178,10 +154,6 @@ def convert_scores_to_points(race_type, scores_df, race):
         .then(1)
         .otherwise(pl.col("total_probability"))
         .alias("total_probability"),
-        # pl.when(pl.col("total_probability_kopman") < 1)
-        #     .then(1)
-        #     .otherwise(pl.col("total_probability_kopman"))
-        # .alias("total_probability_kopman")
     )
     rider_percentages_df = rider_percentages_df.with_columns(
         (pl.col("expected_points_overestimate") / pl.col("total_probability")).alias(
@@ -190,18 +162,12 @@ def convert_scores_to_points(race_type, scores_df, race):
         (
             pl.col("expected_kopman_points_overestimate") / pl.col("total_probability")
         ).alias("expected_kopman_points"),
-    )  # .select(["name", "expected_points"])
-    # df = df.with_row_index("row_nr")
-
-    # Convert dict to DataFrame
-
-    # Join
-    # df = df.join(dict_df, on="row_nr", how="left").drop("row_nr")
+    )  
     return rider_percentages_df
 
 
 if __name__ == "__main__":
-    # get_startlists()
+    get_startlists()
     compute_rider_average_points()
 
 

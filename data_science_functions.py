@@ -947,6 +947,15 @@ def prepare_test_data(
     races_df = pl.read_parquet(data_path(source_dir, "races_df.parquet"))
     results_df = pl.read_parquet(data_path(source_dir, "results_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(source_dir, "rider_yearly_stats_df.parquet"))
+    rider_stats_path = Path(data_path(source_dir, "rider_stats_df.parquet"))
+    riders_personal_data = pl.read_parquet(str(rider_stats_path)) if rider_stats_path.exists() else pl.DataFrame(
+        schema={
+            "name": pl.Utf8,
+            "age": pl.Float64,
+            "height": pl.Float64,
+            "weight": pl.Float64,
+        }
+    )
 
     available_years = (
         races_df.select(pl.col("year").cast(pl.Int64).alias("year"))
@@ -978,10 +987,23 @@ def prepare_test_data(
         on="name",
         how="inner"
     )
+    selected_rider_personal_data = riders_personal_data.join(
+        selected_riders,
+        on="name",
+        how="inner"
+    ) if "name" in riders_personal_data.columns else pl.DataFrame(
+        schema={
+            "name": pl.Utf8,
+            "age": pl.Float64,
+            "height": pl.Float64,
+            "weight": pl.Float64,
+        }
+    )
 
     selected_races.write_parquet(data_path(target_dir, "races_df.parquet"))
     selected_results.write_parquet(data_path(target_dir, "results_df.parquet"))
     selected_rider_yearly_data.write_parquet(data_path(target_dir, "rider_yearly_stats_df.parquet"))
+    selected_rider_personal_data.write_parquet(data_path(target_dir, "rider_stats_df.parquet"))
 
     return {
         "years": selected_years,
@@ -1078,16 +1100,13 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
     print(result_features_df.columns)
     print(len(result_features_df.columns))
     print(result_features_df)
-    breakpoint()
     
     pre_embed_features_df.write_parquet(data_path(data_dir, "pre_embed_features_df.parquet"))
     result_features_df.write_parquet(data_path(data_dir, "result_features_df.parquet"))
-    breakpoint()
 
     results_embedded_df.write_parquet(data_path(data_dir, "results_embedded_df.parquet"))
     races_base_embedded_df.write_parquet(data_path(data_dir, "races_base_embedded_df.parquet"))
     races_inference_embedded_df.write_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
-    breakpoint()
     return {
         "result_features_rows": result_features_df.height,
         "pre_embed_rows": pre_embed_features_df.height,
