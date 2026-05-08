@@ -566,7 +566,9 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
         "name",
         "date",
         "year"
-    ).filter(pl.col("date").is_not_null()).unique()
+    ).filter(pl.col("date").is_not_null()).unique().with_columns(
+        (pl.col("date") - pl.duration(days=1)).alias("feature_date")
+    )
     for label, _ in windows.items():
 
         window_lf = lf.group_by_dynamic(
@@ -585,14 +587,16 @@ def create_result_features_pre_embed(results: pl.DataFrame, races: pl.DataFrame)
             col: f"f{col}_{label}"
             for col in window_lf.columns
             if col not in ["name", "date"]
+        }).rename({
+            "date": "feature_date"
         })
         results_pre_embed_features = results_pre_embed_features.join(
             window_lf,
-            on=["name", "date"],
+            on=["name", "feature_date"],
             how="left"
         ).fill_nan(0).fill_null(0)
-    
-    return results_pre_embed_features
+
+    return results_pre_embed_features.drop("feature_date")
 
 
 from sklearn.decomposition import PCA
@@ -637,7 +641,7 @@ def create_races_inference_embeddings(races_df: pl.DataFrame, base_embeddings_df
         races_df.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
         on = ["name"]
     ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 8
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 4
     ).filter(
         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
     ).filter(
@@ -675,7 +679,7 @@ def create_races_inference_embeddings(races_df: pl.DataFrame, base_embeddings_df
     )
     closest_race_ids = duplicate_races_distance.sort(
         "total_distance", descending=False
-    ).group_by("race_id").head(8).select("race_id", "race_id_right")
+    ).group_by("race_id").head(3).select("race_id", "race_id_right")
     closest_embedding = closest_race_ids.join(
         base_embeddings_df.rename({"race_id": "race_id_right"}),
         on="race_id_right",
@@ -1027,7 +1031,7 @@ def filter_data(
     else:
         necessary_races = races_df.filter(
             pl.col("startlist_score") > 200
-        ).filter(pl.col("stage").is_null())
+        )
     necessary_results = results_df.join(
         necessary_races.select("race_id"),
         on = "race_id",
@@ -1057,27 +1061,41 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
         on = "race_id",
         how = "left"
     )
-    feature_part_results = []
-    pre_embed_part_results = []
+    import gc
+    tmp_dir = Path(data_dir) / "_tmp_parts"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
     for i in range(len(years)-4):
+        target_year = str(years[i+4])
+        print(f"Processing year {target_year} ({i+1}/{len(years)-4})...")
         allowed_years = [str(year) for year in years[i:i+5]]
         part_necessary_races = necessary_races.filter(pl.col("year").is_in(allowed_years))
         part_necessary_results  = necessary_results_with_years.filter(pl.col("year").is_in(allowed_years))
+
         part_results_features_df = create_result_features_table(
             results=part_necessary_results, 
             races=part_necessary_races,
-        ).filter(pl.col("year") == str(years[i+4]))
+        ).filter(pl.col("year") == target_year)
+        part_results_features_df.write_parquet(tmp_dir / f"result_features_{target_year}.parquet")
+        del part_results_features_df
+
         part_pre_embed_features_df = create_result_features_pre_embed(
             results=part_necessary_results, 
             races=normalized_races_df
-        ).filter(pl.col("year") == str(years[i+4]))
-        feature_part_results.append(part_results_features_df)
-        pre_embed_part_results.append(part_pre_embed_features_df)
-    
-    print(f"Concatenating {len(feature_part_results)} result feature DataFrames")
-    print(f"Concatenating {len(pre_embed_part_results)} pre-embed feature DataFrames")
-    result_features_df = pl.concat(feature_part_results).unique(subset=["name", "race_id"])
-    pre_embed_features_df = pl.concat(pre_embed_part_results).unique(subset=["name", "date", "year"])
+        ).filter(pl.col("year") == target_year)
+        part_pre_embed_features_df.write_parquet(tmp_dir / f"pre_embed_features_{target_year}.parquet")
+        del part_pre_embed_features_df, part_necessary_races, part_necessary_results
+        gc.collect()
+
+    result_part_files = sorted(tmp_dir.glob("result_features_*.parquet"))
+    pre_embed_part_files = sorted(tmp_dir.glob("pre_embed_features_*.parquet"))
+    print(f"Concatenating {len(result_part_files)} result feature DataFrames")
+    print(f"Concatenating {len(pre_embed_part_files)} pre-embed feature DataFrames")
+    result_features_df = pl.concat([pl.read_parquet(f) for f in result_part_files]).unique(subset=["name", "race_id"])
+    pre_embed_features_df = pl.concat([pl.read_parquet(f) for f in pre_embed_part_files]).unique(subset=["name", "date", "year"])
+    for f in result_part_files + pre_embed_part_files:
+        f.unlink()
+    tmp_dir.rmdir()
     # result_features_df = create_result_features_table(results=necessary_results, races=necessary_races)    
     # pre_embed_features_df = create_result_features_pre_embed(
     #         results=part_necessary_results, 

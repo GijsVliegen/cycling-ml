@@ -35,7 +35,7 @@ def get_new_race_embedding(
         old_races.select("race_id", "name", "year", *RACE_SIMILARITY_COLS),
         on = ["name"]
     ).filter(
-        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 8
+        pl.col("year").cast(pl.Int64) <= pl.col("year_right").cast(pl.Int64) + 4
     ).filter(
         pl.col("year").cast(pl.Int64) >= pl.col("year_right").cast(pl.Int64)
     ).filter(
@@ -74,7 +74,7 @@ def get_new_race_embedding(
     )
     closest_race_ids = duplicate_races_distance.sort(
         "total_distance", descending=False
-    ).group_by("race_id").head(8).select("race_id", "race_id_right")
+    ).group_by("race_id").head(3).select("race_id", "race_id_right")
     closest_embedding = closest_race_ids.join(
         base_embeddings.rename({"race_id": "race_id_right"}),
         on="race_id_right",
@@ -239,77 +239,39 @@ def get_new_race_features(old_races_features: pl.DataFrame, race_to_find_for: pl
 def get_rider_features(
         new_race: pl.DataFrame,
         startlist: pl.DataFrame, 
-        results: pl.DataFrame, 
-        races: pl.DataFrame
+        results: pl.DataFrame,
+        races: pl.DataFrame,
+        pre_embed_features_df: pl.DataFrame,
     ) -> pl.DataFrame:
+    del results, races
 
-    results_with_dates = results.join(
-        races.select(["race_id", pl.col("date").str.to_date(), "startlist_score"]),
-        on = "race_id",
-        how="left"
-    )
-    results_with_dates = results_with_dates.with_columns(
-        (pl.when(pl.col("rank") <= 3).then(8.333).
-        otherwise(pl.when(
-            pl.col("rank") <= 10).then(2.5)
-            .otherwise(pl.when(pl.col("rank") <= 25).then(1).otherwise(0)
-        )) * pl.col("startlist_score")).alias("points"),
-    )
-    startlist_results = startlist.rename({"rider": "name"}).join(
-        results_with_dates,
-        on = "name"
+    new_race_date = new_race.select(pl.col("date").str.to_date().alias("new_race_date")).to_series().to_list()[0]
+    pre_embed_cols = [col for col in pre_embed_features_df.columns if col.startswith("ftop_")]
+
+    latest_pre_embed_per_rider = (
+        pre_embed_features_df
+        .filter(pl.col("date") < new_race_date)
+        .sort("date", descending=True)
+        .group_by("name")
+        .first()
+        .select(["name", *pre_embed_cols])
     )
 
-    windows = {
-        "1110d": 1110,
-        "370d": 370,
-        "40d": 40,
-    }
-    startlist_results = startlist_results.join(
-        new_race.select(pl.col("date").str.to_date().alias("new_race_date")),
-        how="cross"
-    )
-
-    dfs = []
-    for label, offset in windows.items():
-        dfs.append(
-            startlist_results.filter(
-                pl.col("date") >= (pl.col("new_race_date") - pl.duration(days = (offset - 1)))
-            ).group_by(
-                "name"
-            ).agg(
-                pl.count("race_id").alias(f"nr_races_participated_{label}"),
-                (pl.when(pl.col("rank") < 25).then(1)
-                    .otherwise(None)
-                ).sum().alias(f"nr_top25_{label}"),
-                (pl.when(pl.col("rank") < 10).then(1)
-                    .otherwise(None)
-                ).sum().alias(f"nr_top10_{label}"),
-                (pl.when(pl.col("rank") < 3).then(1)
-                    .otherwise(None)
-                ).sum().alias(f"nr_top3_{label}"),
-                pl.col("points").sum().alias(f"strength_{label}"),
-            )
+    rider_features = (
+        startlist.join(
+            new_race.select("race_id"),
+            how="cross"
         )
-    rider_features = startlist.join(
-        new_race.select("race_id"),
-        how="cross"
-    ).rename({"rider": "name"})
-    for df in dfs:
-        if len(df) == 0:
-            rider_features = rider_features.with_columns(
-                [pl.lit(0).alias(c)
-                 for c in df.columns if c != "name"]
-            )
-            continue
-        rider_features = rider_features.join(
-            df,
+        .rename({"rider": "name"})
+        .join(
+            latest_pre_embed_per_rider,
             on="name",
             how="left"
-        ).fill_null(0)
-    
-    rider_features = rider_features.with_columns(
-        pl.col("strength_370d").rank("dense", descending=True).over(["race_id", "team"]).alias("relative_team_strength_rank")
+        )
+        .with_columns([
+            pl.col(col).fill_null(0.0)
+            for col in pre_embed_cols
+        ])
     )
 
     return rider_features
@@ -325,7 +287,7 @@ def get_rider_embeddings(startlist: pl.DataFrame, results_embedded_df: pl.DataFr
         most_recent_embedding,
         on="name",
         how="left"
-    ).drop("date", "most_recent_date", "cosine_similarity", "race_id")
+    ).drop("date", "most_recent_date", "cosine_similarity", "l1_distance", "race_id")
 
 def get_rider_pairs(race_id: int, result_features_df: pl.DataFrame, min_top_rank: int = None) -> list[list[str, str]]:
     """
@@ -365,7 +327,7 @@ def add_embedding_similarity_for_new_race(
     embedding_similary = calculate_cosine_similarity_polars(results_w_race_embeddings)
 
     return rider_embeddings.join(
-        embedding_similary.select(["name", "cosine_similarity"]),
+        embedding_similary.select(["name", "cosine_similarity", "l1_distance"]),
         on = ["name"],
         how="left"
     )
@@ -382,21 +344,31 @@ def new_race_to_xgboost_format(
     race_id: int = new_race_features.select(
         ["race_id"] 
     ).unique().to_series().to_list()[0] #Take race_ids from results since only care about races with results
-    
+    race_year: int = int(new_race_features.select("year").to_numpy()[0][0])
+
     riders_features, rider_embeddings, _ = mock_model.get_rider_feats(
         race_results = rider_features_df,
         riders_yearly_data = riders_yearly_data,
         riders_personal_data = riders_personal_data,
         race_id = race_id,
-        race_year=2026,
+        race_year=race_year,
         ranks=False
     )
 
 
     race_features = new_race_features.select(mock_model.race_features).to_numpy()[0].astype(np.float32, copy=False)
+    race_embeddings = new_race_features.select(mock_model.embed_features).to_numpy()[0].astype(np.float32, copy=False)
     race_features = np.tile(race_features, (len(riders_features), 1))
+    race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
+    embedding_diff = rider_embeddings - race_embeddings
+    team_rank_feature = mock_model.add_team_rank_feature(
+        rider_features=riders_features,
+        race_features_tiled=race_features,
+        race_results=rider_features_df,
+    )
+    riders_features = np.hstack([riders_features, team_rank_feature])
 
-    race_X = np.hstack([riders_features, race_features]) #, embedding_dff])
+    race_X = np.hstack([riders_features, race_features, embedding_diff])
 
     return race_X
 
@@ -406,6 +378,7 @@ def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
     
     races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
     results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet"))
+    pre_embed_features_df = pl.read_parquet(data_path(data_dir, "pre_embed_features_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
     riders_personal_data = load_rider_personal_data(data_dir)
     
@@ -436,7 +409,8 @@ def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
         new_race=race_stats_df,
         startlist=startlist_df,
         results = necessary_results,
-        races=necessary_races
+        races=necessary_races,
+        pre_embed_features_df=pre_embed_features_df,
     )
     rider_embeddings = get_rider_embeddings(
         startlist = startlist_df,

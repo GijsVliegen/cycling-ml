@@ -113,6 +113,7 @@ def convert_scores_to_points(race_type, scores_df, race):
     # TODO: dont guesstimate temperature but minimize log loss on historical data to find best temperature for plackett-luce
 
     manually_boost_riders_list = [
+        "jonas-vingegaard"
     ]
     manually_lower_riders_list = [
     ]
@@ -167,7 +168,7 @@ def convert_scores_to_points(race_type, scores_df, race):
 
 
 if __name__ == "__main__":
-    get_startlists()
+    # get_startlists()
     compute_rider_average_points()
 
 

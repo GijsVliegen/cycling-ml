@@ -659,6 +659,10 @@ def solve_team_selection(
         t: [r for r in riders if x[(r, t)].value() == 1]
         for t in races
     }
+    #print all riders in the team who cost 2 mil
+    for r in riders:
+        if cost.get(r, 2) == 2 and any(x[(r, t)].value() == 1 for t in races):
+            print(f"Rider {r} has unknown cost, treated as 2 million")
     selected_riders = squads["race_1"]
     selected_kopmannen = {
         t: next(

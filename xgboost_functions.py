@@ -36,6 +36,21 @@ def data_path(data_dir: str, filename: str) -> str:
     return str(Path(data_dir) / filename)
 
 
+def load_result_features_with_pre_embed(data_dir: str) -> pl.DataFrame:
+    """Load result_features_df and join with pre-embedding features."""
+    result_features_df = pl.read_parquet(data_path(data_dir, "result_features_df.parquet"))
+    pre_embed_features_df = pl.read_parquet(data_path(data_dir, "pre_embed_features_df.parquet"))
+    
+    # Join on name, date, year to add pre-embedding stage-type interaction features
+    result_features_df = result_features_df.join(
+        pre_embed_features_df,
+        on=["name", "date", "year"],
+        how="left"
+    ).fill_nan(0).fill_null(0)
+    
+    return result_features_df
+
+
 def load_rider_personal_data(data_dir: str) -> pl.DataFrame:
     rider_stats_path = Path(data_path(data_dir, "rider_stats_df.parquet"))
     if rider_stats_path.exists():
@@ -49,17 +64,14 @@ def load_rider_personal_data(data_dir: str) -> pl.DataFrame:
                 "weight": pl.Float64,
             }
         )
-
     if "age" not in rider_stats_df.columns:
         rider_stats_df = rider_stats_df.with_columns(pl.lit(None).alias("age"))
     if "height" not in rider_stats_df.columns:
         rider_stats_df = rider_stats_df.with_columns(pl.lit(None).alias("height"))
     if "weight" not in rider_stats_df.columns:
         rider_stats_df = rider_stats_df.with_columns(pl.lit(None).alias("weight"))
-
     if "name" not in rider_stats_df.columns:
         rider_stats_df = rider_stats_df.with_columns(pl.lit(None).alias("name"))
-
     return rider_stats_df.select("name", "age", "height", "weight").with_columns(
         pl.col("name").cast(pl.Utf8, strict=False),
         pl.col("age").cast(pl.Float64, strict=False),
@@ -81,26 +93,31 @@ class TeamModel:
             f"embed_{i}"
             for i in range(1, EMBEDDING_SIZE+1)
         ]
+        pre_embed_bucket_features = [
+            "distance_km",
+            "elevation_m",
+            "profile_score",
+            "profile_score_last_25k",
+            "final_km_percentage",
+            "startlist_score",
+            "month",
+        ]
+        pre_embed_windows = ["1110d", "370d", "40d"]
+        pre_embed_rank_thresholds = [25, 5]
+        pre_embed_buckets = ["1", "2", "3"]
+        pre_embed_result_features = [
+            f"ftop_{rank_threshold}_in_{bucket_feature}_{bucket}_{window}"
+            for window in pre_embed_windows
+            for bucket_feature in pre_embed_bucket_features
+            for bucket in pre_embed_buckets
+            for rank_threshold in pre_embed_rank_thresholds
+        ]
         self.rider_result_features = [
-            'nr_races_participated_1110d',
-            'nr_top25_1110d',
-            'nr_top10_1110d',
-            'nr_top3_1110d',
-            "strength_1110d",
-            'nr_races_participated_370d',
-            'nr_top25_370d',
-            'nr_top10_370d',
-            'nr_top3_370d',
-            "strength_370d",
-            'nr_races_participated_40d',
-            'nr_top25_40d',
-            'nr_top10_40d',
-            'nr_top3_40d',
-            "strength_40d",
+            *pre_embed_result_features,
             "cosine_similarity",
             "l1_distance",
-            "relative_team_strength_rank"
-        ] + self.embed_features
+            # embedding-based interaction features are included via embed_diff_*
+        ]
         self.rider_yearly_features = [
             "points",
             "racedays",
@@ -121,7 +138,7 @@ class TeamModel:
             # "classification", #needs to be encoded
             "year",
             "startlist_score", #Check present in pairs
-        ] + self.embed_features
+        ]
 
 
 
@@ -254,6 +271,8 @@ class TeamModel:
             # race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
             # embedding_diff = np.abs(rider_embeddings - race_embeddings)
             race_X = np.hstack([riders_features, race_features])#, embedding_diff])
+            if len(riders_features) <= 1:
+                continue
             if race_year < 2024:
                 X_train.append(race_X)
                 y_train.append(ranks_to_predict)
@@ -273,9 +292,9 @@ class TeamModel:
             raise ValueError("Negative values found in ranks_to_predict, expected non-negative ranks")
         
         # NDCG@25 targets (for ranking model)
-        y_train_ndcg = np.where(y_train_raw <= 5, 1.0 / np.log2((y_train_raw + 6) / 5), 0.0)
+        y_train_ndcg = np.where(y_train_raw <= 5, np.exp(-0.5 * (y_train_raw - 1)), 0.0)
         #TODO: add weights by log2() over startlist score -> more weights for more important races
-        y_test_ndcg = np.where(y_test_raw <= 5, 1.0 / np.log2((y_test_raw + 6) / 5), 0.0)
+        y_test_ndcg = np.where(y_test_raw <= 5, np.exp(-0.5 * (y_test_raw - 1)), 0.0)
         
         print(f"training on {len(y_train_ndcg)} pairs")
         print(f"testing on {len(y_test_ndcg)} pairs")
@@ -302,23 +321,38 @@ class TeamModel:
                 right_on=["name", "year"],
                 how="right" #preserve order of pairs
             ).fill_null(
-                np.NAN
+                np.nan
             ).select(self.rider_yearly_features)
             rider_yearly_data: np.array = rider_yearly_data.to_numpy().astype(np.float32, copy=False).reshape(math.floor(len(rider_filters) / nr_years), nr_years * len(self.rider_yearly_features))
 
             return rider_yearly_data
 
         def get_rider_personal_data(rider_names: pl.DataFrame) -> np.array:
+            personal_source = riders_personal_data.select(["name", *self.rider_personal_features]).with_columns(
+                pl.col("name").cast(pl.Utf8, strict=False)
+            )
+            median_row = personal_source.select(
+                [pl.col(feature).median().alias(feature) for feature in self.rider_personal_features]
+            ).to_dicts()[0]
+            fallback_values = {}
+            for feature in self.rider_personal_features:
+                median_value = median_row.get(feature)
+                fallback_values[feature] = float(median_value) if median_value is not None else 0.0
+
             personal_data: pl.DataFrame = rider_names.join(
-                riders_personal_data.select(["name", *self.rider_personal_features]).with_columns(
-                    pl.col("name").cast(pl.Utf8, strict=False)
-                ),
+                personal_source,
                 on="name",
                 how="left",
             ).with_columns(
-                pl.col("name").cast(pl.Utf8, strict=False)
-            ).fill_null(
-                np.NAN
+                pl.col("name").cast(pl.Utf8, strict=False),
+                *[
+                    pl.col(feature)
+                    .cast(pl.Float64, strict=False)
+                    .fill_nan(fallback_values[feature])
+                    .fill_null(fallback_values[feature])
+                    .alias(feature)
+                    for feature in self.rider_personal_features
+                ]
             ).select(self.rider_personal_features)
             return personal_data.to_numpy().astype(np.float32, copy=False)
 
@@ -339,7 +373,7 @@ class TeamModel:
             race_results.select("name").with_columns(pl.col("name").cast(pl.Utf8, strict=False))
         )
         rider_data = race_results.select(self.rider_result_features).fill_null(
-            np.NAN
+            np.nan
         ).to_numpy().astype(np.float32, copy=False)
         rider_data[np.isnan(rider_data)] = 0.0
         rider_embeddings = race_results.select(self.embed_features).to_numpy().astype(np.float32, copy=False)
@@ -361,7 +395,7 @@ class TeamModel:
                     .alias("rank_in_team")
                 )
                 .select("rank_in_team")
-                .fill_null(np.NAN)
+                .fill_null(np.nan)
                 .to_numpy()
                 .astype(np.float32, copy=False)
                 .flatten()
@@ -416,6 +450,9 @@ class TeamModel:
 
         for group_size in test_groups:
             end = start + group_size
+            if group_size <= 1:
+                start = end
+                continue
             
             y_true_group = y_test[start:end]
             y_pred_group = y_pred[start:end]
@@ -429,6 +466,8 @@ class TeamModel:
             
             ndcg_scores.append(ndcg)
             start = end
+        if len(ndcg_scores) == 0:
+            return 0.0
         return np.mean(ndcg_scores)
 
 class RaceModel:
@@ -461,26 +500,31 @@ class RaceModel:
             f"embed_{i}"
             for i in range(1, EMBEDDING_SIZE+1)
         ]
+        pre_embed_bucket_features = [
+            "distance_km",
+            "elevation_m",
+            "profile_score",
+            "profile_score_last_25k",
+            "final_km_percentage",
+            "startlist_score",
+            "month",
+        ]
+        pre_embed_windows = ["1110d", "370d", "40d"]
+        pre_embed_rank_thresholds = [25, 5]
+        pre_embed_buckets = ["1", "2", "3"]
+        pre_embed_result_features = [
+            f"ftop_{rank_threshold}_in_{bucket_feature}_{bucket}_{window}"
+            for window in pre_embed_windows
+            for bucket_feature in pre_embed_bucket_features
+            for bucket in pre_embed_buckets
+            for rank_threshold in pre_embed_rank_thresholds
+        ]
         self.rider_result_features = [
-            'nr_races_participated_1110d',
-            'nr_top25_1110d',
-            'nr_top10_1110d',
-            'nr_top3_1110d',
-            "strength_1110d",
-            'nr_races_participated_370d',
-            'nr_top25_370d',
-            'nr_top10_370d',
-            'nr_top3_370d',
-            "strength_370d",
-            'nr_races_participated_40d',
-            'nr_top25_40d',
-            'nr_top10_40d',
-            'nr_top3_40d',
-            "strength_40d",
+            *pre_embed_result_features,
             "cosine_similarity",
             "l1_distance",
-            "relative_team_strength_rank"
-        ] + self.embed_features
+            # "relative_team_strength_rank"
+        ]
         self.rider_yearly_features = [
             "points",
             "racedays",
@@ -492,6 +536,7 @@ class RaceModel:
             "height",
             "weight",
         ]
+        self.team_model_rank_feature = "predicted_rank_in_team"
         self.race_features = [ 
             "distance_km",
             "elevation_m",
@@ -501,7 +546,11 @@ class RaceModel:
             # "classification", #needs to be encoded
             "year",
             "startlist_score", #Check present in pairs
-        ] + self.embed_features
+        ]
+
+        self._team_model_loaded = False
+        self._team_model: TeamModel | None = None
+        self._team_model_feature_mismatch_warned = False
 
     def save_model(self, ndcg: bool = True, binary: bool = True) -> None:
         models_dir = Path(self.data_dir) / "models"
@@ -516,6 +565,71 @@ class RaceModel:
         self.bst.load_model(data_path(self.data_dir, "models/xgboost_model.json"))
         self.bst_binary = xgb.Booster()
         self.bst_binary.load_model(data_path(self.data_dir, "models/xgboost_model_binary_classifier.json"))
+
+    def _get_team_model_for_feature(self) -> TeamModel | None:
+        if self._team_model_loaded:
+            return self._team_model
+
+        self._team_model_loaded = True
+        team_model_path = Path(data_path(self.data_dir, "models/xgboost_team_model.json"))
+        if not team_model_path.exists():
+            print("TEAM MODEL NOT FOUND")
+            self._team_model = None
+            return None
+
+        try:
+            team_model = TeamModel(data_dir=self.data_dir, test_mode=self.test_mode)
+            team_model.load_model()
+            self._team_model = team_model
+        except Exception:
+            self._team_model = None
+
+        return self._team_model
+
+    def add_team_rank_feature(
+        self,
+        rider_features: np.ndarray,
+        race_features_tiled: np.ndarray,
+        race_results: pl.DataFrame,
+    ) -> np.ndarray:
+        if rider_features.shape[0] == 0:
+            return np.zeros((0, 1), dtype=np.float32)
+
+        team_model = self._get_team_model_for_feature()
+        if team_model is None:
+            return np.zeros((rider_features.shape[0], 1), dtype=np.float32)
+
+        team_X = np.hstack([rider_features, race_features_tiled])
+        model_num_features = team_model.bst.num_features()
+        if model_num_features != team_X.shape[1]:
+            if not self._team_model_feature_mismatch_warned:
+                print(
+                    "TEAM MODEL FEATURE MISMATCH: "
+                    f"team model expects {model_num_features} features, "
+                    f"but got {team_X.shape[1]}. "
+                    "Using fallback team_rank=0. Retrain team model to re-enable this feature."
+                )
+                self._team_model_feature_mismatch_warned = True
+            return np.zeros((rider_features.shape[0], 1), dtype=np.float32)
+
+        team_scores = team_model.bst.predict(xgb.DMatrix(team_X))
+
+        teams_df = race_results.select(
+            pl.col("team").cast(pl.Utf8, strict=False).fill_null("__unknown_team__").alias("team")
+        )
+        rank_feature = (
+            teams_df.with_columns(pl.Series("team_model_score", team_scores))
+            .with_columns(
+                pl.col("team_model_score")
+                .rank(method="dense", descending=True)
+                .over("team")
+                .alias(self.team_model_rank_feature)
+            )
+            .select(self.team_model_rank_feature)
+            .to_numpy()
+            .astype(np.float32, copy=False)
+        )
+        return rank_feature
 
 # region training models
         
@@ -557,8 +671,12 @@ class RaceModel:
                 "objective": "rank:ndcg",
                 "eval_metric": "ndcg@25",
                 "ndcg_exp_gain": False,
-                "min_child_weight": 10,
-                "max_depth": 6,
+                "min_child_weight": 30,
+                "max_depth": 3,
+                "reg_lambda": 8.0,
+                "gamma": 2.0,
+                "colsample_bytree": 0.7,
+                "colsample_bylevel": 0.8,
                 "tree_method": "hist",
                 # "max_bin": 3,
                 "early_stopping_rounds": 5 if self.test_mode else 10,
@@ -672,9 +790,11 @@ class RaceModel:
         X_train = []
         y_train = []
         train_groups = []
+        w_train = []
         X_test = []
         y_test = []
         test_groups = []
+        w_test = []
         result_features_df = result_features_df.unique(subset = ["race_id", "name"])
         all_race_ids: list[int] = result_features_df.join(
             races_features_df.select("race_id", "year"),
@@ -706,33 +826,47 @@ class RaceModel:
             )
 
             race_features = race_stats.select(self.race_features).to_numpy()[0].astype(np.float32, copy=False)
-            # race_embeddings = race_stats.select(self.embed_features).to_numpy()[0].astype(np.float32, copy=False)
+            race_embeddings = race_stats.select(self.embed_features).to_numpy()[0].astype(np.float32, copy=False)
             race_features = np.tile(race_features, (len(riders_features), 1))
-            # race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
-            # embedding_diff = np.abs(rider_embeddings - race_embeddings)
-            race_X = np.hstack([riders_features, race_features])#, embedding_diff])
+            race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
+            embedding_diff = rider_embeddings - race_embeddings
+            team_rank_feature = self.add_team_rank_feature(
+                rider_features=riders_features,
+                race_features_tiled=race_features,
+                race_results=race_results,
+            )
+            riders_features = np.hstack([riders_features, team_rank_feature])
+            race_X = np.hstack([riders_features, race_features, embedding_diff])
+            startlist_score = float(race_stats.select("startlist_score").to_numpy()[0][0])
+            race_weight = np.log2(max(startlist_score, 1) + 1)
+            n_riders = len(riders_features)
+            if n_riders <= 1:
+                continue
             if race_year < 2024:
                 X_train.append(race_X)
                 y_train.append(ranks_to_predict)
-                train_groups.append(len(riders_features))
+                train_groups.append(n_riders)
+                w_train.append(np.full(n_riders, race_weight, dtype=np.float32))
             else:
                 X_test.append(race_X)
                 y_test.append(ranks_to_predict)
-                test_groups.append(len(riders_features))
+                test_groups.append(n_riders)
+                w_test.append(np.full(n_riders, race_weight, dtype=np.float32))
 
         y_train_raw = np.concatenate(y_train)
         X_train = np.vstack(X_train)
+        w_train_arr = np.concatenate(w_train)
         y_test_raw = np.concatenate(y_test)
         X_test = np.vstack(X_test)
+        w_test_arr = np.concatenate(w_test)
 
         if any(y_test_raw < 0) or any(y_train_raw < 0):
             breakpoint()
             raise ValueError("Negative values found in ranks_to_predict, expected non-negative ranks")
         
-        # NDCG@25 targets (for ranking model)
-        y_train_ndcg = np.where(y_train_raw <= 30, 1.0 / np.log2((y_train_raw + 6) / 5), 0.0)
-        #TODO: add weights by log2() over startlist score -> more weights for more important races
-        y_test_ndcg = np.where(y_test_raw <= 30, 1.0 / np.log2((y_test_raw + 6) / 5), 0.0)
+        # NDCG@25 targets (for ranking model), weighted by log2(startlist_score+1)
+        y_train_ndcg = np.where(y_train_raw <= 30, (31 - y_train_raw) / np.log2((y_train_raw + 1)), 0.0) * w_train_arr
+        y_test_ndcg = np.where(y_test_raw <= 30, (31 - y_test_raw) / np.log2((y_test_raw + 1)), 0.0) * w_test_arr
         
         # Binary targets (for classification model): top-25 = 1, else = 0
         y_train_binary = np.where(y_train_raw <= 10, 1.0, 0.0).astype(np.float32)
@@ -763,23 +897,38 @@ class RaceModel:
                 right_on=["name", "year"],
                 how="right" #preserve order of pairs
             ).fill_null(
-                np.NAN
+                np.nan
             ).select(self.rider_yearly_features)
             rider_yearly_data: np.array = rider_yearly_data.to_numpy().astype(np.float32, copy=False).reshape(math.floor(len(rider_filters) / nr_years), nr_years * len(self.rider_yearly_features))
 
             return rider_yearly_data
 
         def get_rider_personal_data(rider_names: pl.DataFrame) -> np.array:
+            personal_source = riders_personal_data.select(["name", *self.rider_personal_features]).with_columns(
+                pl.col("name").cast(pl.Utf8, strict=False)
+            )
+            median_row = personal_source.select(
+                [pl.col(feature).median().alias(feature) for feature in self.rider_personal_features]
+            ).to_dicts()[0]
+            fallback_values = {}
+            for feature in self.rider_personal_features:
+                median_value = median_row.get(feature)
+                fallback_values[feature] = float(median_value) if median_value is not None else 0.0
+
             personal_data: pl.DataFrame = rider_names.join(
-                riders_personal_data.select(["name", *self.rider_personal_features]).with_columns(
-                    pl.col("name").cast(pl.Utf8, strict=False)
-                ),
+                personal_source,
                 on="name",
                 how="left",
             ).with_columns(
-                pl.col("name").cast(pl.Utf8, strict=False)
-            ).fill_null(
-                np.NAN
+                pl.col("name").cast(pl.Utf8, strict=False),
+                *[
+                    pl.col(feature)
+                    .cast(pl.Float64, strict=False)
+                    .fill_nan(fallback_values[feature])
+                    .fill_null(fallback_values[feature])
+                    .alias(feature)
+                    for feature in self.rider_personal_features
+                ]
             ).select(self.rider_personal_features)
             return personal_data.to_numpy().astype(np.float32, copy=False)
 
@@ -800,13 +949,13 @@ class RaceModel:
             race_results.select("name").with_columns(pl.col("name").cast(pl.Utf8, strict=False))
         )
         rider_data = race_results.select(self.rider_result_features).fill_null(
-            np.NAN
+            np.nan
         ).to_numpy().astype(np.float32, copy=False)
         rider_data[np.isnan(rider_data)] = 0.0
         rider_embeddings = race_results.select(self.embed_features).to_numpy().astype(np.float32, copy=False)
         if ranks:
             ranks_to_predict = race_results.select("rank").fill_null(
-                np.NAN
+                np.nan
             ).to_numpy().astype(np.float32, copy=False).flatten()
         else:
             ranks_to_predict = None
@@ -833,6 +982,9 @@ class RaceModel:
 
         for group_size in test_groups:
             end = start + group_size
+            if group_size <= 1:
+                start = end
+                continue
             
             y_true_group = y_test[start:end]
             y_pred_group = y_pred[start:end]
@@ -846,6 +998,8 @@ class RaceModel:
             
             ndcg_scores.append(ndcg)
             start = end
+        if len(ndcg_scores) == 0:
+            return 0.0
         return np.mean(ndcg_scores)
 
     def compute_auc(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -1045,7 +1199,7 @@ def train(
     data_dir: str = DEFAULT_DATA_DIR,
     test_mode: bool = False,
 ):
-    result_features_df = pl.read_parquet(data_path(data_dir, "result_features_df.parquet"))
+    result_features_df = load_result_features_with_pre_embed(data_dir)
     results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
     races_inference_embedded_df = pl.read_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
@@ -1071,6 +1225,15 @@ def train(
         on = ["race_id"],
         how="right"
     )
+
+    if train_team:
+        model = TeamModel(data_dir=data_dir, test_mode=test_mode)
+        model.train_model(
+            result_features_df=results_features, 
+            riders_yearly_data=riders_yearly_data,
+            riders_personal_data=riders_personal_data,
+            races_features_df=races_features)
+        model.save_model()
     model = RaceModel(data_dir=data_dir, test_mode=test_mode)
     model.train_model(
         result_features_df=results_features, 
@@ -1084,19 +1247,11 @@ def train(
         ndcg = train_ndcg,
         binary = train_binary
     )
-    if train_team:
-        model = TeamModel(data_dir=data_dir, test_mode=test_mode)
-        model.train_model(
-            result_features_df=results_features, 
-            riders_yearly_data=riders_yearly_data,
-            riders_personal_data=riders_personal_data,
-            races_features_df=races_features)
-        model.save_model()
 
 
 
 def evaluate(data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False):
-    result_features_df = pl.read_parquet(data_path(data_dir, "result_features_df.parquet"))
+    result_features_df = load_result_features_with_pre_embed(data_dir)
     results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
     races_inference_embedded_df = pl.read_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
@@ -1169,7 +1324,7 @@ from scipy.optimize import minimize
 from sklearn.metrics import log_loss
 
 def minimize_logloss():
-    result_features_df = pl.read_parquet("data_v2/result_features_df.parquet")
+    result_features_df = load_result_features_with_pre_embed("data_v2")
     results_embedded_df = pl.read_parquet("data_v2/results_embedded_df.parquet")
     races_inference_embedded_df = pl.read_parquet("data_v2/races_inference_embedded_df.parquet")
     riders_yearly_data = pl.read_parquet("data_v2/rider_yearly_stats_df.parquet")
@@ -1276,8 +1431,8 @@ def optimize_weighted_points(scores1, scores2, y_true_rank, test_groups, points_
 
 def main(data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False):
     train(
-        train_ndcg=False,
-        train_binary=False,
+        train_ndcg=True,
+        train_binary=True,
         train_team=True,
         data_dir=data_dir,
         test_mode=test_mode,
