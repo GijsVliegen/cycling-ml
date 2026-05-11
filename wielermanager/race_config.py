@@ -102,7 +102,7 @@ def expand_stage_race_entry(race_entry: dict, default_year: int = DEFAULT_YEAR) 
 
 def resolve_races_to_predict(rules: dict, default_year: int = DEFAULT_YEAR) -> list[RaceTuple]:
     resolved_races: list[RaceTuple] = []
-    for race_entry in rules["races"]:
+    for race_entry in rules.get("races_voorjaar", []) + rules.get("races", []):
         if race_entry.get("load_all_stages"):
             resolved_races.extend(expand_stage_race_entry(race_entry, default_year=default_year))
         else:

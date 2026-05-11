@@ -6,6 +6,28 @@ import hashlib
 
 
 
+def clean_won_how(won_how: str | None) -> str:
+    if won_how in {None, "", "-", "Other"}:
+        return "unknown"
+    if won_how == "Time trial":
+        return "time_trial"
+    if won_how == "Sprint à deux":
+        return "duo_sprint"
+    if won_how.endswith("km solo"):
+        return "solo"
+    if won_how == "Sprint of small group":
+        return "small_sprint"
+    if won_how == "Sprint of large group":
+        return "large_sprint"
+    if won_how.startswith("Sprint of ") and won_how.endswith(" riders"):
+        try:
+            rider_count = int(won_how.removeprefix("Sprint of ").removesuffix(" riders"))
+            return "small_sprint" if rider_count < 10 else "large_sprint"
+        except ValueError:
+            return "unknown"
+    return "unknown"
+
+
 def filter_stats(stats: dict, race_url) -> dict:
     stats = {
         "startlist_score": stats["Startlist quality score"],
@@ -42,6 +64,7 @@ def filter_stats(stats: dict, race_url) -> dict:
         "avg_speed_kmh": stats.get("speed").replace(" km/h", "") if stats.get("speed") else "-1",
         "startlist_score": stats.get("startlist_score").split(" ")[1][1:-1] if " " in stats.get("startlist_score") else stats.get("startlist_score"), #in case of stage races, take current startlist score for that stage
         "won_how": stats.get("won_how"),
+        "won_how_clean": clean_won_how(stats.get("won_how")),
         "temp": stats.get("temp").replace(" °C", "") if stats.get("temp") else "-1", #lets hope this is not a possible value
         "profile_score": stats.get("profile_score"),
         "profile_score_last_25k": stats.get("profile_score_last_25k"),

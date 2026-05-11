@@ -51,9 +51,16 @@ from sklearn.discriminant_analysis import StandardScaler
 
 EMBEDDING_SIZE = 10 
 DEFAULT_DATA_DIR = "data_v2"
+
+# Classifications to include when filtering races for feature creation / inference.
+# Covers WorldTour, ProSeries, Hors Catégorie and national/world championship tiers.
+TOP_TIER_CLASSIFICATIONS = [
+    "1.UWT", "1.Pro", "1.HC",
+    "2.UWT", "2.Pro", "2.HC",
+    "WT", "WC", "NC",
+]
+MAX_PROFILE_SCORE_FOR_MODEL = 500.0
 DEFAULT_TEST_DATA_DIR = "data_test"
-
-
 def data_path(data_dir: str, filename: str) -> str:
     return str(Path(data_dir) / filename)
 
@@ -62,6 +69,76 @@ def ensure_data_dir(data_dir: str) -> Path:
     path = Path(data_dir)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+def won_how_clean_expr(column_name: str = "won_how") -> pl.Expr:
+    won_how = pl.col(column_name).cast(pl.Utf8, strict=False)
+    sprint_group_size = won_how.str.extract(r"^Sprint of (\d+) riders$", 1).cast(pl.Int64, strict=False)
+
+    return (
+        pl.when(
+            won_how.is_null()
+            | (won_how == "")
+            | (won_how == "-")
+            | (won_how == "Other")
+        )
+        .then(pl.lit("unknown"))
+        .when(won_how == "Time trial")
+        .then(pl.lit("time_trial"))
+        .when(won_how == "Sprint à deux")
+        .then(pl.lit("duo_sprint"))
+        .when(won_how.str.contains(r"km solo$", literal=False))
+        .then(pl.lit("solo"))
+        .when(won_how == "Sprint of small group")
+        .then(pl.lit("small_sprint"))
+        .when(won_how == "Sprint of large group")
+        .then(pl.lit("large_sprint"))
+        .when(sprint_group_size.is_not_null() & (sprint_group_size < 10))
+        .then(pl.lit("small_sprint"))
+        .when(sprint_group_size.is_not_null())
+        .then(pl.lit("large_sprint"))
+        .otherwise(pl.lit("unknown"))
+        .alias("won_how_clean")
+    )
+
+
+def replace_zero_elevation_with_unknown(races_df: pl.DataFrame) -> pl.DataFrame:
+    cols_to_sanitize = [
+        "elevation_m",
+        "profile_score",
+        "profile_score_last_25k",
+        "startlist_score",
+    ]
+    existing_cols = [col for col in cols_to_sanitize if col in races_df.columns]
+    if not existing_cols:
+        if "won_how" in races_df.columns:
+            return races_df.with_columns(won_how_clean_expr())
+        return races_df
+
+    expressions = [
+        pl.when(pl.col(col).cast(pl.Float64, strict=False) == 0)
+        .then(float("nan"))
+        .otherwise(pl.col(col).cast(pl.Float64, strict=False))
+        .alias(col)
+        for col in existing_cols
+    ]
+    if "won_how" in races_df.columns:
+        expressions.append(won_how_clean_expr())
+
+    return races_df.with_columns(expressions)
+
+def filter_races_for_xgboost_input(races_df: pl.DataFrame) -> pl.DataFrame:
+    profile_score = pl.col("profile_score").cast(pl.Float64, strict=False)
+    elevation_m = pl.col("elevation_m").cast(pl.Float64, strict=False)
+    profile_unknown = profile_score.is_null() | profile_score.is_nan()
+    elevation_unknown = elevation_m.is_null() | elevation_m.is_nan()
+    return races_df.filter(
+        pl.col("classification").is_in(TOP_TIER_CLASSIFICATIONS)
+        & (
+            profile_unknown
+            | (profile_score <= MAX_PROFILE_SCORE_FOR_MODEL)
+        )
+        & ~(profile_unknown & elevation_unknown)
+    )
 
 def find_most_similar_races(normalised_upcoming_race_df: pl.DataFrame, normalized_races_df: pl.DataFrame, k = 5) -> pl.DataFrame:
     """
@@ -766,7 +843,6 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
         "40d": 40,
     }
 
-    dfs = []
     results = results.join(
         races.select(["race_id", pl.col("date").str.to_date(), "startlist_score", "year"]),
         on = "race_id",
@@ -789,8 +865,9 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     lf = bare_results.lazy()
 
         #TODO: change offset - 1 int ooffset + 1? Is information leaking into features? especiallly for 40d window?
+    import gc as _gc
     for label, offset in windows.items():
-        dfs.append(
+        _window_df = (
             lf.with_columns(
                 (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
             ).group_by_dynamic(
@@ -817,9 +894,9 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
             .rename({f"_window_date_{label}": "date"})
             .collect(engine="streaming")
         )
-    
-    for d in dfs:
-        results = results.join(d, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
+        results = results.join(_window_df, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
+        del _window_df
+        _gc.collect()
 
     # -------- team features ----------
     #top 10 is 2.5 times harder than top 25, top 3 is 8.3 times harder than top 25, so we can weight them accordingly
@@ -918,11 +995,11 @@ def check_rider_stats():
     pass
 
 def create_normalized_race_data():
-    races_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "races_df.parquet"))
-    results_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "results_df.parquet")).filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    necessary_races = races_df.filter(
-        pl.col("startlist_score") > 100
+    races_df = replace_zero_elevation_with_unknown(
+        pl.read_parquet(data_path(DEFAULT_DATA_DIR, "races_df.parquet"))
     )
+    results_df = pl.read_parquet(data_path(DEFAULT_DATA_DIR, "results_df.parquet")).filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
+    necessary_races = filter_races_for_xgboost_input(races_df)
     # results_similarity = create_results_similarity(results_df)
     interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
@@ -930,11 +1007,11 @@ def create_normalized_race_data():
 
 
 def create_normalized_race_data_for_dir(data_dir: str = DEFAULT_DATA_DIR):
-    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
-    results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet")).filter(pl.col("rank") != -1)
-    necessary_races = races_df.filter(
-        pl.col("startlist_score") > 100
+    races_df = replace_zero_elevation_with_unknown(
+        pl.read_parquet(data_path(data_dir, "races_df.parquet"))
     )
+    results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet")).filter(pl.col("rank") != -1)
+    necessary_races = filter_races_for_xgboost_input(races_df)
     interpolated_races_df = interpolate_profile_scores(races_df=necessary_races)
     normalized_races_df = normalize_race_data(races_df=interpolated_races_df)
     normalized_races_df.write_parquet(data_path(data_dir, "normalized_races_df.parquet"))
@@ -948,7 +1025,9 @@ def prepare_test_data(
     nr_years: int = 7,
 ) -> dict:
     ensure_data_dir(target_dir)
-    races_df = pl.read_parquet(data_path(source_dir, "races_df.parquet"))
+    races_df = replace_zero_elevation_with_unknown(
+        pl.read_parquet(data_path(source_dir, "races_df.parquet"))
+    )
     results_df = pl.read_parquet(data_path(source_dir, "results_df.parquet"))
     riders_yearly_data = pl.read_parquet(data_path(source_dir, "rider_yearly_stats_df.parquet"))
     rider_stats_path = Path(data_path(source_dir, "rider_stats_df.parquet"))
@@ -975,7 +1054,7 @@ def prepare_test_data(
         races_df
         .filter(pl.col("year").is_in(selected_years_str))
         .filter(pl.col("stage").is_null())
-        .filter(pl.col("startlist_score") > 100)
+        .pipe(filter_races_for_xgboost_input)
         .sort(["year", "startlist_score"], descending=[False, True])
         .group_by("year")
         .head(max_races_per_year)
@@ -1020,14 +1099,14 @@ def filter_data(
         races_df: pl.DataFrame, 
         results_df: pl.DataFrame,
         feature_creation: bool = False) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """FIlters on
-     -> startlist score > 200, to focus on more competitive races
+    """Filters on
+     -> top-tier classification (WorldTour, ProSeries, HC, WC, NC) for feature creation
+     -> excludes races with profile_score > 2000 while keeping unknown profile scores
+     -> startlist score > 200 for inference / prediction
      -> filter on stages? NO!
      """
     if feature_creation:
-        necessary_races = races_df.filter(
-            pl.col("startlist_score") > 100
-        )
+        necessary_races = filter_races_for_xgboost_input(races_df)
     else:
         necessary_races = races_df.filter(
             pl.col("startlist_score") > 200
@@ -1044,10 +1123,14 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
     pl.Config.set_tbl_cols(-1)
 
     results_df = pl.read_parquet(data_path(data_dir, "results_df.parquet")).filter(pl.col("rank") != -1)#filter out DNF, DNS, OTL
-    races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
+    races_df = replace_zero_elevation_with_unknown(
+        pl.read_parquet(data_path(data_dir, "races_df.parquet"))
+    )
     necessary_races, necessary_results = filter_data(races_df, results_df, feature_creation=True)
 
-    normalized_races_df = pl.read_parquet(data_path(data_dir, "normalized_races_df.parquet"))
+    normalized_races_df = replace_zero_elevation_with_unknown(
+        pl.read_parquet(data_path(data_dir, "normalized_races_df.parquet"))
+    )
     # races_features_df = create_race_features_table(
     #     races=races_df, 
     #     results=results_df,
@@ -1065,9 +1148,15 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
     tmp_dir = Path(data_dir) / "_tmp_parts"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    for i in range(len(years)-4):
+    total_years = len(years) - 4
+    for i in range(total_years):
         target_year = str(years[i+4])
-        print(f"Processing year {target_year} ({i+1}/{len(years)-4})...")
+        result_part_path = tmp_dir / f"result_features_{target_year}.parquet"
+        pre_embed_part_path = tmp_dir / f"pre_embed_features_{target_year}.parquet"
+        if result_part_path.exists() and pre_embed_part_path.exists():
+            print(f"Skipping year {target_year} ({i+1}/{total_years}) — part files already exist.")
+            continue
+        print(f"Processing year {target_year} ({i+1}/{total_years})...")
         allowed_years = [str(year) for year in years[i:i+5]]
         part_necessary_races = necessary_races.filter(pl.col("year").is_in(allowed_years))
         part_necessary_results  = necessary_results_with_years.filter(pl.col("year").is_in(allowed_years))
@@ -1076,23 +1165,39 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
             results=part_necessary_results, 
             races=part_necessary_races,
         ).filter(pl.col("year") == target_year)
-        part_results_features_df.write_parquet(tmp_dir / f"result_features_{target_year}.parquet")
+        part_results_features_df.write_parquet(result_part_path)
         del part_results_features_df
 
         part_pre_embed_features_df = create_result_features_pre_embed(
             results=part_necessary_results, 
             races=normalized_races_df
         ).filter(pl.col("year") == target_year)
-        part_pre_embed_features_df.write_parquet(tmp_dir / f"pre_embed_features_{target_year}.parquet")
+        part_pre_embed_features_df.write_parquet(pre_embed_part_path)
         del part_pre_embed_features_df, part_necessary_races, part_necessary_results
         gc.collect()
+
+    # Check all parts are present before proceeding to concat
+    missing_years = [
+        str(years[i+4]) for i in range(total_years)
+        if not (tmp_dir / f"result_features_{str(years[i+4])}.parquet").exists()
+        or not (tmp_dir / f"pre_embed_features_{str(years[i+4])}.parquet").exists()
+    ]
+    if missing_years:
+        print(f"\nIncomplete run — missing parts for years: {missing_years}")
+        print("Re-run the script to resume from where it stopped.")
+        return None
+
+    # Free large frames that are no longer needed before the heavy concat step
+    del necessary_results_with_years
+    gc.collect()
 
     result_part_files = sorted(tmp_dir.glob("result_features_*.parquet"))
     pre_embed_part_files = sorted(tmp_dir.glob("pre_embed_features_*.parquet"))
     print(f"Concatenating {len(result_part_files)} result feature DataFrames")
     print(f"Concatenating {len(pre_embed_part_files)} pre-embed feature DataFrames")
-    result_features_df = pl.concat([pl.read_parquet(f) for f in result_part_files]).unique(subset=["name", "race_id"])
-    pre_embed_features_df = pl.concat([pl.read_parquet(f) for f in pre_embed_part_files]).unique(subset=["name", "date", "year"])
+    # Use lazy scan so Polars streams parts instead of materialising all at once
+    result_features_df = pl.scan_parquet(tmp_dir / "result_features_*.parquet").collect(engine="streaming").unique(subset=["name", "race_id"])
+    pre_embed_features_df = pl.scan_parquet(tmp_dir / "pre_embed_features_*.parquet").collect(engine="streaming").unique(subset=["name", "date", "year"])
     for f in result_part_files + pre_embed_part_files:
         f.unlink()
     tmp_dir.rmdir()
@@ -1173,7 +1278,9 @@ def assert_embedding_similarity():
 
 if __name__ == "__main__":
     create_normalized_race_data()
-    main()
+    result = main()
+    if result is None:
+        print("Run the script again to continue from the last completed year.")
     # assert_embedding_dimension()
     # assert_embedding_similarity()
     # check_results_df()

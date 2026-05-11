@@ -23,7 +23,9 @@ TOP_K = 12
 rules = load_wielermanager_rules()
 points_per_race_type = rules["points_per_race"]
 
-with open("wielermanager/WIELERMANAGER_BUDGETS_giro_2026.json") as f:
+BUDGETS_PATH = Path("wielermanager/WIELERMANAGER_BUDGETS_voorjaar_2026.json")
+
+with open(BUDGETS_PATH, encoding="utf-8") as f:
     budgets = json.load(f)
     # riders_with_known_calender = budgets["riders_with_calender_known"]
     budgets_list = budgets["budgets"]

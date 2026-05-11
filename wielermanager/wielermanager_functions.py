@@ -4,9 +4,7 @@ from pathlib import Path
 from data_engineering.data_structure_functions import create_new_race_data
 from wielermanager.race_prediction_functions import predict_race
 from wielermanager.race_config import (
-    load_race_manifest,
     load_wielermanager_rules,
-    resolve_races_to_predict,
     write_race_manifest,
 )
 from data_science_functions import scores_to_probability_results
@@ -34,10 +32,10 @@ def ensure_wielermanager_dir(data_dir: str) -> Path:
 
 
 def get_races_to_predict(data_dir: str = DEFAULT_DATA_DIR, year: int = 2026):
-    manifest_races = load_race_manifest(data_dir)
-    if manifest_races is not None:
-        return manifest_races
-    return resolve_races_to_predict(rules, default_year=year)
+    return [
+        (race_entry["pcs_name"], -1, race_entry["type"])
+        for race_entry in rules.get("races_voorjaar", [])
+    ]
 
 
 def get_available_races(data_dir: str = DEFAULT_DATA_DIR, limit: int | None = None):
@@ -71,7 +69,7 @@ def prepare_test_race_data(
 
 def get_startlists(data_dir: str = DEFAULT_DATA_DIR, year: int = 2026):
     ensure_wielermanager_dir(data_dir)
-    races_to_predict = resolve_races_to_predict(rules, default_year=year)
+    races_to_predict = get_races_to_predict(data_dir=data_dir, year=year)
     write_race_manifest(data_dir, races_to_predict)
     logs = create_new_race_data(races_to_predict, data_dir=data_dir, year=year)
     print(logs)
@@ -168,7 +166,7 @@ def convert_scores_to_points(race_type, scores_df, race):
 
 
 if __name__ == "__main__":
-    # get_startlists()
+    get_startlists()
     compute_rider_average_points()
 
 
