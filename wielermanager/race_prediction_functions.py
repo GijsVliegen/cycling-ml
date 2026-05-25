@@ -389,7 +389,7 @@ def predict_race(startlist_df, race_stats_df, data_dir: str = DEFAULT_DATA_DIR):
     riders_yearly_data = riders_yearly_data.with_columns(
         pl.all().replace(-1, 0)
     )
-    necessary_races, necessary_results = filter_data(races_df, results_df, feature_creation=True)
+    necessary_races, necessary_results = filter_data(races_df, results_df)
 
     if len(
         race_stats_df.filter(pl.col("name") == "classic-brugge-de-panne")
