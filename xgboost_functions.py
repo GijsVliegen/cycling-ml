@@ -13,7 +13,7 @@ from sklearn.metrics import (
     precision_recall_curve,
     mean_absolute_error
 )
-from data_science_functions import (
+from data_science.data_science_functions import (
     EMBEDDING_SIZE,
     RACE_SIMILARITY_COLS,
     calculate_cosine_similarity_polars,
@@ -226,7 +226,7 @@ class TeamModel:
         result_features_df: pl.DataFrame, 
         riders_yearly_data: pl.DataFrame,
         riders_personal_data: pl.DataFrame,
-        races_features_df: pl.DataFrame
+        races_features_df: pl.DataFrame,
     ) -> np.ndarray:
 
         X_train = []
@@ -784,7 +784,8 @@ class RaceModel:
         result_features_df: pl.DataFrame, 
         riders_yearly_data: pl.DataFrame,
         riders_personal_data: pl.DataFrame,
-        races_features_df: pl.DataFrame
+        races_features_df: pl.DataFrame,
+        apply_team_model_to_training_rows: bool = False,
     ) -> np.ndarray:
 
         X_train = []
@@ -830,11 +831,15 @@ class RaceModel:
             race_features = np.tile(race_features, (len(riders_features), 1))
             race_embeddings = np.tile(race_embeddings, (len(riders_features), 1))
             embedding_diff = rider_embeddings - race_embeddings
-            team_rank_feature = self.add_team_rank_feature(
-                rider_features=riders_features,
-                race_features_tiled=race_features,
-                race_results=race_results,
-            )
+            is_training_split = race_year < 2024
+            if apply_team_model_to_training_rows or (not is_training_split):
+                team_rank_feature = self.add_team_rank_feature(
+                    rider_features=riders_features,
+                    race_features_tiled=race_features,
+                    race_results=race_results,
+                )
+            else:
+                team_rank_feature = np.zeros((len(riders_features), 1), dtype=np.float32)
             riders_features = np.hstack([riders_features, team_rank_feature])
             race_X = np.hstack([riders_features, race_features, embedding_diff])
             startlist_score = float(race_stats.select("startlist_score").to_numpy()[0][0])
@@ -842,7 +847,7 @@ class RaceModel:
             n_riders = len(riders_features)
             if n_riders <= 1:
                 continue
-            if race_year < 2024:
+            if is_training_split:
                 X_train.append(race_X)
                 y_train.append(ranks_to_predict)
                 train_groups.append(n_riders)
@@ -1132,7 +1137,8 @@ class RaceModel:
             result_features_df=result_features_df,
             riders_yearly_data=riders_yearly_data,
             riders_personal_data=riders_personal_data,
-            races_features_df=races_features_df
+            races_features_df=races_features_df,
+            apply_team_model_to_training_rows=False,
         )
         
         # Get predictions from ranking model
@@ -1165,7 +1171,8 @@ class RaceModel:
             result_features_df=result_features_df, 
             riders_yearly_data=riders_yearly_data, 
             riders_personal_data=riders_personal_data,
-            races_features_df=races_features_df 
+            races_features_df=races_features_df,
+            apply_team_model_to_training_rows=False,
         )
         
         # Train ranking model (NDCG@25)
@@ -1202,6 +1209,12 @@ def train(
     result_features_df = load_result_features_with_pre_embed(data_dir)
     results_embedded_df = pl.read_parquet(data_path(data_dir, "results_embedded_df.parquet"))
     races_inference_embedded_df = pl.read_parquet(data_path(data_dir, "races_inference_embedded_df.parquet"))
+    #TODO: clean riders_yearly_data
+    # - when season is empty
+    # - it shows sum over all years, this row should be removed
+    # - also replace -1 with 0 for Wins, Top-3s and Top-10s
+    # - replace -1 with null for points, racedays and kms
+    
     riders_yearly_data = pl.read_parquet(data_path(data_dir, "rider_yearly_stats_df.parquet"))
     riders_personal_data = load_rider_personal_data(data_dir)
     races_df = pl.read_parquet(data_path(data_dir, "races_df.parquet"))
@@ -1282,6 +1295,7 @@ def evaluate(data_dir: str = DEFAULT_DATA_DIR, test_mode: bool = False):
         riders_yearly_data=riders_yearly_data, 
         riders_personal_data=riders_personal_data,
         races_features_df = races_features,
+        apply_team_model_to_training_rows=False,
     )
 
     model.evaluate_ndcg(X_test, y_test_ndcg, test_groups=test_groups)

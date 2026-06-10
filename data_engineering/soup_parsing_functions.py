@@ -103,9 +103,6 @@ def parse_race_page(soup) -> dict:
         'Timelimit': '14%, or 5:23:25 (+0:39:43)',   -> only for stage races
         
     """
-
-    #TODO: startlist quality score in stage races drops over time due to dropouts, but considering the tiredness of peloton increases, ignore this for now.
-
     h4 = soup.find("h4", string="Race information")
 
     # Step 2: Find the next <ul> with the desired class after the h4
@@ -426,6 +423,7 @@ def parse_startlist_page(soup) -> tuple[list[dict], list[str]]:
         if not team_href.startswith("team/"):
             continue
         team_slug = team_href.split("team/")[1].strip()
+        team_slug = None if team_slug == "" else team_slug
         teams.append(team_slug)
         # Loop over each rider in this team
         for rider_li in team_li.select("ul li"):

@@ -1,4 +1,4 @@
-from data_science_functions import main_test as features_main_test
+from data_science.data_science_functions import main_test as features_main_test
 from xgboost_functions import main_test as models_main_test
 from wielermanager.wielermanager_functions import main_test as predictions_main_test
 from wielermanager.team_optimizer_functions import main_test as team_main_test

@@ -60,7 +60,6 @@ def transform_new_race_data(new_race_dict: dict) -> pl.DataFrame:
         pl.col("temp").cast(pl.Float64, strict=False),
         pl.col("profile_score").cast(pl.Float64, strict=False),
         pl.col("profile_score_last_25k").cast(pl.Float64, strict=False),
-        #TODO: add profile scores
     ])
     return races_df
 
@@ -78,7 +77,6 @@ def transform_race_data(all_race_stats: list[dict], all_results: list[dict]) -> 
 
     races_df = pl.DataFrame(all_race_stats)
     races_df = races_df.with_columns([
-        # pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"),
         pl.col("distance_km").cast(pl.Float64, strict=False),
         pl.col("elevation_m").cast(pl.Float64, strict=False),
         pl.col("avg_speed_kmh").cast(pl.Float64, strict=False),
@@ -86,8 +84,7 @@ def transform_race_data(all_race_stats: list[dict], all_results: list[dict]) -> 
         pl.col("final_km_percentage").cast(pl.Float64, strict=False),
         pl.col("temp").cast(pl.Float64, strict=False),
         pl.col("profile_score").cast(pl.Float64, strict=False),
-        pl.col("profile_score_last_25k").cast(pl.Float64, strict=False),
-        #TODO: add profile scores
+        pl.col("profile_score_last_25k").cast(pl.Float64, strict=False)
     ])
     
     results_df = pl.DataFrame(all_results)

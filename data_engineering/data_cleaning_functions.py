@@ -83,15 +83,21 @@ def filter_results(results: list[dict], race_stats: dict) -> list[dict]:
             continue
         seen_rider_ids.add(rider_name)
 
+        team_value = rider.get("Team")
+        if isinstance(team_value, str):
+            team_value = team_value.strip()
+        if team_value == "":
+            team_value = None
+
         new_results.append({
-            "rank": rider.get("Rnk") if (rider.get("Rnk") and rider.get("Rnk") not in {"DNF", "DNS", "OTL"}) else "-1", #TODO: Rnk can be "DNF"
+            "rank": rider.get("Rnk") if (rider.get("Rnk") and rider.get("Rnk") not in {"DNF", "DNS", "OTL"}) else "-1",
             "name": rider_name,
             "specialty": rider["Specialty"],
-            "team": rider["Team"],
+            "team": team_value,
             "age": rider.get("Age") if rider.get("Age") else "-1",
             "uci_pts": rider.get("UCI") if rider.get("UCI") else "-1",
             "pcs_pts": rider.get("Pnt") if rider.get("Pnt") else "-1",
-            "race_id": race_stats.get("race_id"),#"R" + hashlib.md5(f"{race_stats.get("name")}_{race_stats.get("year")}_{race_stats.get("stage")}".encode()).hexdigest()[:8],
+            "race_id": race_stats.get("race_id"),
         })
 
     return new_results

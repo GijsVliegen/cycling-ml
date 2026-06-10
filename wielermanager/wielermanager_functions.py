@@ -7,7 +7,7 @@ from wielermanager.race_config import (
     load_wielermanager_rules,
     write_race_manifest,
 )
-from data_science_functions import scores_to_probability_results
+from data_science.data_science_functions import scores_to_probability_results
 
 rules = load_wielermanager_rules()
 points_per_race_type = rules["points_per_race"]
@@ -108,8 +108,6 @@ def convert_scores_to_points(race_type, scores_df, race):
     points_per_rank = points_per_race_type[race_type]
     points_per_kopman_rank = {"1": 30, "2": 25, "3": 20, "4": 15, "5": 10, "6": 5}
 
-    # TODO: dont guesstimate temperature but minimize log loss on historical data to find best temperature for plackett-luce
-
     manually_boost_riders_list = [
         "jonas-vingegaard"
     ]
@@ -128,6 +126,7 @@ def convert_scores_to_points(race_type, scores_df, race):
         .alias("score")
     ).sort("score", descending=True)
 
+    # TODO: dont guesstimate temperature but minimize log loss on historical data to find best temperature for plackett-luce
     rider_percentages_df = scores_to_probability_results(
         scores_df, max_rank_to_predict=30, temperature=0.2
     )

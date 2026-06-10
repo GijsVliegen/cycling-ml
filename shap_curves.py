@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import polars as pl
 import shap
-from data_science_functions import (
+from data_science.data_science_functions import (
     EMBEDDING_SIZE,
     filter_data,
 )

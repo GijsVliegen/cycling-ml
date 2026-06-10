@@ -67,11 +67,7 @@ def solve_team_selection(
     race_dfs: list[pl.DataFrame],
     cost_df: pl.DataFrame,
     enforce_seed_team: bool = True,
-):
-
-    #TODO: assumed to be ordered eactually, so no todo
-    # sorted_race_dfs = sorted(race_dfs, key=lambda df: df["expected_points"].max(), reverse=True)
-    
+):  
     race_tables = []
     race_tables_kopman = []
     for i, df in enumerate(race_dfs):
@@ -625,10 +621,6 @@ def solve_team_selection(
         
         #one kopman
         model += pulp.lpSum(k[(r, t)] for r in riders if expected_kopman_points[r][t] > 0) == 1
-
-
-        # make sure to have enough budget for future transfers, not just current one
-        #TODO: how to?
 
         # budget
         model += pulp.lpSum(cost.get(r, 2) * x[(r, t)] for r in riders) + transfer_cost_expr <= BUDGET
