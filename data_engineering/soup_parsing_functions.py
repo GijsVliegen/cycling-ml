@@ -118,6 +118,18 @@ def parse_race_page(soup) -> dict:
             value = value_div.get_text(strip=True)
             race_info[key] = value
 
+    # Extract climbs list (strips "location/" prefix from each href)
+    climbs = None
+    climbs_header = soup.find("h4", string="Climbs")
+    if climbs_header:
+        climbs_ul = climbs_header.find_next("ul", class_="list circle")
+        if climbs_ul:
+            climbs = [
+                a["href"].removeprefix("location/")
+                for a in climbs_ul.find_all("a", href=True)
+            ]
+    race_info["climbs"] = climbs
+
     return race_info
 
 def parse_race_result_page(soup) -> list[dict]:
@@ -155,6 +167,7 @@ def parse_race_result_page(soup) -> list[dict]:
             row_data_points = []
             racer_url = ""
 
+            breakaway_km = None
             for cell in row.find_all("td"):
                 # Handle Rider column (name is in <a> tags)
                 if cell.find("a") and "ridername" in cell.get("class", []):
@@ -162,6 +175,15 @@ def parse_race_result_page(soup) -> list[dict]:
                     full_name = rider_name.get_text(strip=True)
                     row_data_points.append(full_name)
                     racer_url = rider_name["href"]
+                    # Extract breakaway km from svg_shield title, e.g. "151 kilometre in a group before the peloton"
+                    shield = cell.find("div", class_="svg_shield")
+                    if shield:
+                        title_text = shield.get("title", "")
+                        km_match = re.search(r"(\d+)\s+kilometre", title_text, flags=re.IGNORECASE)
+                        if km_match:
+                            breakaway_km = int(km_match.group(1))
+                        else:
+                            breakpoint()
 
                 # Handle Team column
                 elif cell.find("a") and "cu600" in cell.get("class", []):
@@ -188,7 +210,8 @@ def parse_race_result_page(soup) -> list[dict]:
             row_data_dict = {
                 key: val for (key, val) in zip(headers, row_data_points, strict=True)
             } | {
-                "racer_url_index": racer_url
+                "racer_url_index": racer_url,
+                "breakaway": breakaway_km,
             }
             results.append(row_data_dict)
 

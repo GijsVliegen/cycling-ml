@@ -498,13 +498,14 @@ def exp_decay_weighted_average(
     results: pl.DataFrame,
     races: pl.DataFrame,
     features_to_calculate_average_for: List[str],
-    half_times_in_days: List[int],
+    # half_times_in_days: List[int],
     top_rank_thresholds: List[int],
 ) -> pl.DataFrame:
+    half_time_in_days = 370
     #order 
     np.set_printoptions(precision=3)
     np.set_printoptions(precision=3, suppress=True)
-    results = results.filter(pl.col("rank") < 40)
+    results = results.filter(pl.col("rank") < 40).filter(pl.col("name") == "mathieu-van-der-poel")
     df = results.join(
         races.select([
             "race_id", 
@@ -530,30 +531,32 @@ def exp_decay_weighted_average(
     n_rows = len(values)
     n_features = len(features_to_calculate_average_for) 
     n_ranks = len(top_rank_thresholds)
-    n_decays = len(half_times_in_days)
+    n_decays = len([half_time_in_days])
 
     #n x (features x rank_thresholds) 
     #cant create mask in one pass due to intermediate polars step that gets rank as duplicate column
     #due to double for loop
     filter_masks = df.with_columns(
         [
-            ((pl.col("rank") < rank_threshold) & (pl.col(feature).is_not_null()))
+            ((pl.col("rank") <= rank_threshold) & (pl.col(feature).is_not_null()))
             # (pl.col(f"{rank_threshold}_mask") & (pl.col(feature).is_not_null()))
-            .alias(f"filter_mask_top_{rank_threshold}_{feature}_{half_time}" )
+            .alias(f"filter_mask_top_{rank_threshold}_{feature}")#_{half_time}" )
             for rank_threshold in top_rank_thresholds
             for feature in features_to_calculate_average_for
-            for half_time in half_times_in_days
+            # for half_time in half_times_in_days
         ]
     ).select([
-        f"filter_mask_top_{rank_threshold}_{feature}_{half_time}" 
+        f"filter_mask_top_{rank_threshold}_{feature}"#_{half_time}" 
         for rank_threshold in top_rank_thresholds 
         for feature in features_to_calculate_average_for 
-        for half_time in half_times_in_days
+        # for half_time in half_times_in_days
     ]).to_numpy()
 
     weighted_averages = np.full((n_rows, n_ranks * n_features *  n_decays), np.nan)
     weighted_variances = np.full((n_rows, n_ranks * n_features *  n_decays), np.nan)
-    decay_consts = np.array([np.log(2) / half_time for half_time in half_times_in_days])
+    # decay_consts = np.array([np.log(2) / half_time for half_time in half_times_in_days])
+    decay_const = np.array([np.log(2) / half_time_in_days])
+    weighted_sums_squared = np.zeros(n_ranks * n_features *  n_decays)
     weighted_sums = np.zeros(n_ranks * n_features *  n_decays)
     weight_sums = np.zeros(n_ranks * n_features *  n_decays)
     prev_rider = rider_ids[0]
@@ -570,8 +573,7 @@ def exp_decay_weighted_average(
             prev_date = date
         
         delta_days = date - prev_date
-        decays = np.exp(-decay_consts * delta_days)
-        # decay = np.exp(-decay_const * delta_days)
+        decay = np.exp(-decay_const * delta_days)
 
         #TODO: if any features are null
         # This influences mask, and may cause that the application needs to be switched around
@@ -584,11 +586,11 @@ def exp_decay_weighted_average(
         # ...
         # - feat n_decay multiplied decay 0
 
-        weighted_sums_squared = np.tile(decays, n_features * n_ranks)
+        weighted_sums_squared *= np.tile(decay, n_features * n_ranks)
 
-        weighted_sums *= np.tile(decays, n_features * n_ranks)
+        weighted_sums *= np.tile(decay, n_features * n_ranks)
 
-        weight_sums *= np.tile(decays, n_features * n_ranks)
+        weight_sums *= np.tile(decay, n_features * n_ranks)
 
         weighted_averages[i] = np.where(weight_sums > 0, weighted_sums / weight_sums, np.nan)
         weighted_variances[i] = np.where(weight_sums > 0, (
@@ -619,20 +621,87 @@ def exp_decay_weighted_average(
         weight_sums += filter_masks[i] * np.ones(n_ranks * n_features * n_decays)
         prev_date = date
     
-    return df.with_columns(
-        [
-            pl.Series(f"decay_weighted_{feature}_{rank_threshold}_{half_time}", weighted_averages[:, idx])
+    return df.with_columns([
+        *[
+            pl.Series(f"decay_weighted_{feature}_{rank_threshold}", weighted_averages[:, idx])
             for idx, (feature, rank_threshold, half_time) in enumerate(
-                [(f, r, h) for r in top_rank_thresholds for f in features_to_calculate_average_for for h in half_times_in_days]
+                [(f, r)#, h) 
+                for r in top_rank_thresholds 
+                for f in features_to_calculate_average_for 
+                # for h in half_times_in_days
+                ]
             )
-        ]
+        ],
+        *[
+            pl.Series(f"decay_weighted_{feature}_{rank_threshold}_variance", weighted_variances[:, idx])
+            for idx, (feature, rank_threshold, half_time) in enumerate(
+                [(f, r)#, h) 
+                for r in top_rank_thresholds 
+                for f in features_to_calculate_average_for 
+                # for h in half_times_in_days
+                ]
+            )
+        ]]
     )
 
+def calculate_variance_aware_center_point(
+    rider_weighted_race_features: pl.DataFrame,
+    races_df: pl.DataFrame,
+    features_to_calculate_for: List[str],
+    rank_threshold = 25,
+    half_time_in_days = 700
+): 
+    """ Riders has columns for average and variance of features
+    
+    calculate center point of top riders for each race
+
+    -> measure between actual race features and riders who perform good on it is posssible
+    """
+    df = rider_weighted_race_features.filter(pl.col("rank") < 10)
+    df = df.with_columns(
+        [*[
+            ((pl.col(f"decay_weighted_{feature}_{rank_threshold}")
+            / pl.col(f"decay_weighted_{feature}_{rank_threshold}_variance"))
+            ).alias(f"average_over_variance_{feature}")
+            for feature in features_to_calculate_for
+        ],*[
+            (1
+            / pl.col(f"decay_weighted_{feature}_{rank_threshold}_variance")
+            ).alias(f"inverse_variance_{feature}")
+            for feature in features_to_calculate_for
+        ]]
+    )
+    df = df.group_by(
+        "race_id"
+    ).agg(
+        [*[pl.sum(pl.col("average_over_variance_{feature}")).alias("sum_average_over_variance_{feature}")
+          for feature in features_to_calculate_for
+        ],
+        *[pl.sum(pl.col("inverse_variance_{feature}")).alias("sum_inverse_variance_{feature}")
+          for feature in features_to_calculate_for
+        ]]
+    )
+    df = df.with_columns(
+        [*[
+            (pl.col(f"sum_average_over_variance_{feature}") /
+              pl.col(f"sum_inverse_variance_{feature}")
+            ).alias(f"center_point_{feature}")
+            for feature in features_to_calculate_for
+        ],*[
+            (1 / pl.col(f"sum_inverse_variance_{feature}")).alias(f"center_point_variance_{feature}")
+            for feature in features_to_calculate_for
+        ]]
+    ).select([
+        "race_id",
+        *[f"center_point_{feature}" for feature in features_to_calculate_for],
+        *[f"center_point_variance_{feature}" for feature in features_to_calculate_for]
+    ])
+    return df
 
 def test_numba_for_loop(results: pl.DataFrame, races:pl.DataFrame) -> pl.DataFrame:
     half_times_in_days = [370, 40]
-    rank_thresholds = [25, 3]
-    features = ["startlist_score", "profile_score", "profile_score_last_25k"]
+    rank_thresholds = [25, 10, 3]
+    features = ["profile_score", "startlist_score"]
     exp_decay_weighted_average(
         results = results,
         races=races,        
@@ -1124,7 +1193,7 @@ def main(data_dir: str = DEFAULT_DATA_DIR):
 
     normalized_races_df.write_parquet(data_path(data_dir, "normalized_races_df.parquet"))
     necessary_results = results_add_team_rank(necessary_results)
-    a = test_numba_for_loop(necessary_results, normalized_races_df)
+    a = test_numba_for_loop(necessary_results, necessary_races)
 
     result_features_df, pre_embed_features_df = create_result_aggregations(
         normalized_races_df=normalized_races_df, 
