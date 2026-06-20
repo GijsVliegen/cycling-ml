@@ -2,6 +2,7 @@ import math
 import polars as pl
 from typing import List, Dict
 from pathlib import Path
+from data_engineering.data_structure_functions import TOP_TIER_CLASSIFICATIONS
 
 import numpy as np
 
@@ -16,11 +17,6 @@ DEFAULT_DATA_DIR = "data_v2"
 
 # Classifications to include when filtering races for feature creation / inference.
 # Covers WorldTour, ProSeries, Hors Catégorie and national/world championship tiers.
-TOP_TIER_CLASSIFICATIONS = [
-    "1.UWT", "1.Pro", "1.HC",
-    "2.UWT", "2.Pro", "2.HC",
-    "WT", "WC", "NC",
-]
 MAX_PROFILE_SCORE = 500.0
 DEFAULT_TEST_DATA_DIR = "data_test"
 
@@ -494,6 +490,70 @@ def add_embedding_similarity_to_results_df(
         how="left"
     )
 
+def windowed_aggregation(
+    results,
+    races,
+    features_to_aggregate,
+    windowed_expressions_to_aggregate,
+    # rank_thresholds: list[int],
+):
+    """
+    Docstring for windowed_aggregation
+    
+    :param results: Description
+    :param races: Description
+    :param features_to_aggregate: Description
+    :param aggregations: Description
+    :param rank_thresholds: Description
+    :param windows: Description
+    """
+
+    results = results.join(
+        races.select(["race_id", pl.col("date").str.to_date(), *[
+            f 
+            for f in features_to_aggregate
+            if f in races.columns
+        ]]),
+        on = "race_id",
+        how = "left"
+    )
+    bare_results = results.select([
+        "name",
+        "date",
+        *features_to_aggregate
+    ]).sort("date")
+    lf = bare_results.lazy()
+
+    for window, expressions_to_aggregate in windowed_expressions_to_aggregate.items():
+        offset = int(window)
+        label = f"{offset}d"
+        _window_df = (
+            lf.with_columns(
+                (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
+            ).group_by_dynamic(
+                index_column=f"_window_date_{label}",
+                period=label,
+                offset= f"-{label}",
+                every="1d",
+                group_by="name",
+                start_by="window",
+            )
+            .agg(
+                *expressions_to_aggregate
+                # pl.len().alias(f"nr_races_participated_{label}"),
+                # *[
+                #     (pl.when(pl.col("rank") < rank_threshold).then(1)
+                #         .otherwise(None)
+                #     ).sum().alias(f"nr_top_{rank_threshold}_{label}")
+                #     for rank_threshold in rank_thresholds
+                # ],
+            )
+            .rename({f"_window_date_{label}": "date"})
+            .collect(engine="streaming")
+        )
+        results = results.join(_window_df, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
+    return results
+
 def exp_decay_weighted_average(
     results: pl.DataFrame,
     races: pl.DataFrame,
@@ -624,7 +684,9 @@ def exp_decay_weighted_average(
     return df.with_columns([
         *[
             pl.Series(f"decay_weighted_{feature}_{rank_threshold}", weighted_averages[:, idx])
-            for idx, (feature, rank_threshold, half_time) in enumerate(
+            for idx, (
+                feature, rank_threshold#, half_time
+            ) in enumerate(
                 [(f, r)#, h) 
                 for r in top_rank_thresholds 
                 for f in features_to_calculate_average_for 
@@ -634,7 +696,8 @@ def exp_decay_weighted_average(
         ],
         *[
             pl.Series(f"decay_weighted_{feature}_{rank_threshold}_variance", weighted_variances[:, idx])
-            for idx, (feature, rank_threshold, half_time) in enumerate(
+            for idx, (feature, rank_threshold#, half_time
+            ) in enumerate(
                 [(f, r)#, h) 
                 for r in top_rank_thresholds 
                 for f in features_to_calculate_average_for 
@@ -706,70 +769,9 @@ def test_numba_for_loop(results: pl.DataFrame, races:pl.DataFrame) -> pl.DataFra
         results = results,
         races=races,        
         features_to_calculate_average_for=features,
-        half_times_in_days=half_times_in_days,
+        # half_times_in_days=half_times_in_days,
         top_rank_thresholds=rank_thresholds
     )
-    # half_time_in_days = 370
-    # rank_threshold = 25
-    # feature = "startlist_score"
-
-    # #create new column with weighted average using - 
-    # #   - exponential time decay weights
-    # #   - iterative trick to avoid expensive groupby operations in polars, since each row only depends on the previous row of the same rider
-    # df = results.join(
-    #     races.select(["race_id", pl.col("date").str.to_date(), "startlist_score"]),
-    #     on = "race_id",
-    #     how = "left"
-    # ).sort(["name", "date"]).with_columns(
-    #     # pl.col("date").cast(pl.Int64).alias("date_int"),
-    #     pl.col("name").cast(pl.Categorical).alias("rider_id")
-    # )
-    # rider_ids = df["rider_id"].to_physical().cast(pl.Int32).to_numpy()
-    # dates_days = df.select(pl.col("date").dt.epoch("d")).to_numpy().flatten()
-
-    # values = df[feature].to_numpy()
-
-    # filter_mask = (
-    #     (df["rank"] < rank_threshold)
-    #     & (df[feature].is_not_null())
-    # ).to_numpy()
-
-    # n = len(values)
-    # result = np.full(n, np.nan)
-    # decay_const = np.log(2) / half_time_in_days
-    # weighted_sum = 0.0
-    # weight_sum = 0.0
-    # prev_rider = rider_ids[0]
-    # prev_date = dates_days[0]
-    # for i in range(n):
-    #     rider = rider_ids[i]
-    #     date = dates_days[i]
-
-    #     #new rider, reset sums
-    #     if rider != prev_rider:
-    #         weighted_sum = 0.0
-    #         weight_sum = 0.0
-    #         prev_rider = rider
-    #         prev_date = date
-        
-    #     delta_days = date - prev_date
-    #     decay = np.exp(-decay_const * delta_days)
-
-    #     weighted_sum *= decay
-    #     weight_sum *= decay
-
-    #     if weight_sum > 0:
-    #         result[i] = weighted_sum / weight_sum
-        
-    #     if filter_mask[i]:
-    #         weighted_sum += values[i]
-    #         weight_sum += 1.0
-    #     prev_date = date
-    
-    # return df.with_columns(
-    #     pl.Series(f"decay_weighted_{feature}", result)    
-    # )
-
 
 def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> pl.DataFrame:
     #TODO: create strength scores for multiple types of races
@@ -779,37 +781,11 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     # - can use weighted average for features like
     # - average top-3 startlist score
     # - average top-25 startlist score
-    # feasible using iterative trick: 
-    # - S_t ​= value_t ​+ e^(−λ * Δ_t) * S_(t−1)​
-    # -> do this trick using for-loop in Numba over each rider at once or something
-        # from numba import njit
-        # import numpy as np
-
-        # @njit
-        # def compute_decay(groups, days, values, tau):
-        #     out = np.empty(len(values))
-
-        #     current_sum = 0.0
-
-        #     for i in range(len(values)):
-        #         if i == 0 or groups[i] != groups[i-1]:
-        #             current_sum = values[i]
-        #         else:
-        #             delta = days[i] - days[i-1]
-        #             current_sum = values[i] + current_sum * np.exp(-delta / tau)
-
-        #         out[i] = current_sum
-
-        #     return out
-        # days = df["date"].cast(pl.Int64).to_numpy() / (24 * 3600 * 1_000_000)
-        # days = days.astype(np.float64)
-
-        # group_codes, _ = pd.factorize(df["rider_id"])
-        # group_codes = group_codes.astype(np.int64)
 
         # decayed_sum = compute_decay(group_codes, days, values, tau)
     #TODO: best result for each window, is with hard window tho so not sure
-    #TODO: counting the nr of races for each window might give indications on injuries, fatigue, etc. and is also easier to do with hard windows
+    #TODO: counting the nr of races for each window might give indications on injuries, fatigue, etc. 
+    # and is also easier to do with hard windows
 
     windows = {
         "1110d": 1110,
@@ -827,42 +803,43 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
         on = "race_id",
         how = "left"
     )
-    bare_results = results.select([
-        "name",
-        "date",
-        "rank",
-        # "points",
-        "year"
-    ]).sort("date")
-    lf = bare_results.lazy()
+    # bare_results = results.select([
+    #     "name",
+    #     "date",
+    #     "rank",
+    #     # "points",
+    #     "year"
+    # ]).sort("date")
+    # lf = bare_results.lazy()
 
-    for label, offset in windows.items():
-        _window_df = (
-            lf.with_columns(
-                (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
-            ).group_by_dynamic(
-                index_column=f"_window_date_{label}",
-                period=label,
-                offset= f"-{label}",
-                every="1d",
-                group_by="name",
-                start_by="window",
-            )
-            .agg(
-                pl.len().alias(f"nr_races_participated_{label}"),
-                *[
-                    (pl.when(pl.col("rank") < rank_threshold).then(1)
-                        .otherwise(None)
-                    ).sum().alias(f"nr_top_{rank_threshold}_{label}")
-                    for rank_threshold in rank_thresholds
-                ],
-            )
-            .rename({f"_window_date_{label}": "date"})
-            .collect(engine="streaming")
-        )
-        results = results.join(_window_df, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
-        del _window_df
-        gc.collect()
+    # for label, offset in windows.items():
+    #     _window_df = (
+    #         lf.with_columns(
+    #             (pl.col("date") + pl.duration(days = (offset - 1))).alias(f"_window_date_{label}")
+    #         ).group_by_dynamic(
+    #             index_column=f"_window_date_{label}",
+    #             period=label,
+    #             offset= f"-{label}",
+    #             every="1d",
+    #             group_by="name",
+    #             start_by="window",
+    #         )
+    #         .agg(
+    #             pl.len().alias(f"nr_races_participated_{label}"),
+    #             *[
+    #                 (pl.when(pl.col("rank") < rank_threshold).then(1)
+    #                     .otherwise(None)
+    #                 ).sum().alias(f"nr_top_{rank_threshold}_{label}")
+    #                 for rank_threshold in rank_thresholds
+    #             ],
+    #         )
+    #         .rename({f"_window_date_{label}": "date"})
+    #         .collect(engine="streaming")
+    #     )
+    #     results = results.join(_window_df, on=["name", "date"], how="left").fill_nan(0).fill_null(0)
+    #     del _window_df
+    #     gc.collect()
+    
     #TODO: delta change of strength score can be important, rapidly improving riders outperform their current strength score 
 
 
@@ -902,18 +879,21 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
             (pl.col("date") - pl.col("prev_top3")).alias("days_since_last_top3")
         )
     ).select(["name", "race_id", "days_since_last_top3"])
+
     #percentage of races in which team_rank was 1
     # - count race nr in reverse, per rider
     # - use reverse race nr as exponential decay factor of .1
     # - sum decay factors where team_rank was 1 and divide by sum of all decay factors
     #TODO: also with numba for loop
+    # - current group-by only calculates for the msot recent ace, needs to be calculated for all races
+    # - group-by verions:
     # half_time_nr_races = 10
     # decay_rate = np.log(2) / half_time_nr_races 
     # decay_weights = sorted_results.with_columns(
     #         pl.col("date").sort_by("date", descending=True).rank("dense").over("name").alias("reverse_race_nr")
     #     ).with_columns(
     #         # (0.1 ** pl.col("reverse_race_nr")).alias("decay_weight")
-    #         (pl.exp(-decay_rate * pl.col("reverse_race_nr"))).alias("decay_weight")
+    #         ((-decay_rate * pl.col("reverse_race_nr")).exp()).alias("decay_weight")
     #     )
     # percentage_kopman_race_decay = (
     #     decay_weights.with_columns(
@@ -922,7 +902,8 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
     #         (pl.col("kopman_decay").sum() / pl.col("decay_weight").sum()).alias("percentage_kopman_race_decay")
     #     )
     # ).select(["name", "race_id", "percentage_kopman_race_decay"])
-    #same as last but team_rank was 3 or lower
+
+    #percentage of races in which team_rank was 3 or lower
     # percentage_team_top3_race_decay = (
     #     decay_weights.with_columns(
     #         pl.when(pl.col("team_rank") <= 3).then(pl.col("decay_weight")).otherwise(0).alias("team_top3_decay")
@@ -943,6 +924,7 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
             (pl.col("day_nr_that_year") - pl.col("first_day_of_season")).alias("days_since_season_start")
         )
     ).select(["name", "race_id", "days_since_season_start"])
+
     #nr race_days this season
     # - use ordinal grouped over name and year, so it automatically resets each season and counts
     race_days_this_season = (
@@ -953,6 +935,49 @@ def create_result_features_table(results: pl.DataFrame, races:pl.DataFrame) -> p
 
     # -------- team features ----------
     #TODO: wins of team in last year or last 3 years
+    race_winner_team = sorted_results.join(
+        sorted_results.filter(pl.col("rank") == 1)
+        .select(["race_id", "team"]).rename({"team": "winning_team"}),
+        on="race_id",
+        how="left"
+    )
+    in_winning_team = race_winner_team.with_columns(
+        (pl.col("team") == pl.col("winning_team")).alias("in_winning_team")
+    ).drop("winning_team")
+    features_to_aggregate = ["in_winning_team", "rank"]
+    expressions_to_aggregate = {
+        "370": [
+            pl.sum("in_winning_team").alias("nr_wins_in_last_year"),
+            *[
+                (pl.when(pl.col("rank") < rank_threshold).then(1)
+                    .otherwise(None)
+                ).sum().alias(f"individual_nr_top_{rank_threshold}")
+                for rank_threshold in rank_thresholds
+            ],
+        ]#,
+        # "1100": [
+        # ]
+    }
+    
+    #nr of top-3, top-10, top-25, of teammembers in windows
+    nr_of_individual_wins = windowed_aggregation(
+        results = in_winning_team,
+        races=races,
+        features_to_aggregate=features_to_aggregate,
+        windowed_expressions_to_aggregate=expressions_to_aggregate,
+    )
+    nr_of_team_top_results = nr_of_individual_wins.group_by("race_id", "team").agg(
+        *[pl.sum(f"nr_top_{rank_threshold}_370d").alias(f"team_nr_top_{rank_threshold}_370d")
+         for rank_threshold in rank_thresholds]
+    ).select(
+        ["race_id", "team", 
+         *[f"team_nr_top_{rank_threshold}_370d" for rank_threshold in rank_thresholds]]
+    )
+    #nr of teammates
+    nr_of_teammates = sorted_results.group_by("race_id", "team").agg(
+        pl.n_unique("name").alias("nr_teammates")
+    ).select(["race_id", "team", "nr_teammates"])
+
     #TODO: best teammate in world ranking
     #TODO: average teammate world ranking
 
@@ -1276,8 +1301,8 @@ def assert_embedding_similarity():
 
 
 if __name__ == "__main__":
-    result = main_test()
-    # result = main()
+    # result = main_test()
+    result = main()
     # if result is None:
     #     print("Run the script again to continue from the last completed year.")
     # # assert_embedding_dimension()

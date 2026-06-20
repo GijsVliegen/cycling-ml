@@ -29,22 +29,26 @@ def clean_won_how(won_how: str | None) -> str:
 
 
 def filter_stats(stats: dict, race_url) -> dict:
-    stats = {
-        "startlist_score": stats["Startlist quality score"],
-        "final_km_percentage": stats["Gradient final km"],
-        "heigh_meters": stats["Vertical meters"],
-        "date": datetime.strptime(stats["Date"], "%d %B %Y"), #or Datename aswell sometimes?
-        "distance": stats["Distance"].split(" ")[0],
-        "classification": stats["Classification"],
-        "won_how": stats["Won how"],
-        "speed": stats["Avg. speed winner"],
-        "temp": stats["Avg. temperature"],
-        "profile_score": stats["ProfileScore"],
-        "profile_score_last_25k": stats["PS_final_25k"],
-    } | get_race_name_info(race_url)
+    # stats = {
+    #     "startlist_score": stats["Startlist quality score"],
+    #     "final_km_percentage": stats["Gradient final km"],
+    #     "heigh_meters": stats["Vertical meters"],
+    #     "date": , #or Datename aswell sometimes?
+    #     "distance": ,
+    #     "classification": stats["Classification"],
+    #     "won_how": stats["Won how"],
+    #     "speed": stats["Avg. speed winner"],
+    #     "temp": stats["Avg. temperature"],
+    #     "profile_score": stats["ProfileScore"],
+    #     "profile_score_last_25k": stats["PS_final_25k"],
+    # }
+    stats |= get_race_name_info(race_url)
 
-    date_str = stats["date"].strftime("%Y-%m-%d")
-    classification = stats["classification"]
+    final_km_percentage_str = stats.get("Gradient final km", "-1%")
+    dist = stats["Distance"].split(" ")[0]
+    speed_str = stats.get("Avg. speed winner")
+    startlist_score_str = stats.get("Startlist quality score")
+    temp_str = stats.get("Avg. temperature")
     
     # Generate race_id: Hash of date+classification
     # race_id = "R" + hashlib.md5(f"{date_str}_{classification}".encode()).hexdigest()[:8]
@@ -53,21 +57,23 @@ def filter_stats(stats: dict, race_url) -> dict:
     return {
         # "race_id": race_id,
         "race_id": "R" + hashlib.md5(f"{stats.get("name")}_{stats.get("year")}_{stats.get("stage")}".encode()).hexdigest()[:8],
-        "date": date_str,
+        "date": datetime.strptime(stats["Date"], "%d %B %Y").strftime("%Y-%m-%d"),
         "name": stats.get("name"),
         "year": stats.get("year"),
         "stage": stats.get("stage"),
-        "classification": classification,
-        "final_km_percentage": float(stats.get("final_km_percentage", "-1%")[:-1]) if stats.get("final_km_percentage") != "" else -1 ,
-        "distance_km": stats.get("distance") if stats.get("distance") else "-1",
-        "elevation_m": stats.get("heigh_meters") if stats.get("heigh_meters") else "-1",
-        "avg_speed_kmh": stats.get("speed").replace(" km/h", "") if stats.get("speed") else "-1",
-        "startlist_score": stats.get("startlist_score").split(" ")[1][1:-1] if " " in stats.get("startlist_score") else stats.get("startlist_score"), #in case of stage races, take current startlist score for that stage
-        "won_how": stats.get("won_how"),
-        "won_how_clean": clean_won_how(stats.get("won_how")),
-        "temp": stats.get("temp").replace(" °C", "") if stats.get("temp") else "-1", #lets hope this is not a possible value
-        "profile_score": stats.get("profile_score"),
-        "profile_score_last_25k": stats.get("profile_score_last_25k"),
+        "classification": stats["Classification"],
+        "race_category": stats["Race category"],
+        "final_km_percentage":  float(final_km_percentage_str[:-1]) if final_km_percentage_str != "" else -1 ,
+        "distance_km": float(dist) if dist else -1,
+        "elevation_m": stats.get("Vertical meters", "-1"),
+        "avg_speed_kmh": speed_str.replace(" km/h", "") if speed_str else "-1",
+        "startlist_score": startlist_score_str.split(" ")[1][1:-1] if " " in startlist_score_str else startlist_score_str, #in case of stage races, take current startlist score for that stage
+        "won_how": stats.get("Won how"),
+        "temp": temp_str.replace(" °C", "") if temp_str else "-1", #lets hope this is not a possible value
+        "profile_score": stats.get("ProfileScore"),
+        "profile_score_last_25k": stats.get("PS_final_25k"),
+        "won_how_clean": clean_won_how(stats.get("Won how")),
+        "climbs": stats.get("climbs", None),
     }
 
 
@@ -79,7 +85,8 @@ def filter_results(results: list[dict], race_stats: dict) -> list[dict]:
         
         rider_name = rider["racer_url_index"].split("/")[-1]
         if rider_name in seen_rider_ids:
-            print(f"⚠️ Duplicate entry for rider '{rider_name}' in race {race_stats.get("name")}")
+            if rider_name != "":
+                print(f"⚠️ Duplicate entry for rider '{rider_name}' in race {race_stats.get("name")}")
             continue
         seen_rider_ids.add(rider_name)
 
@@ -98,6 +105,7 @@ def filter_results(results: list[dict], race_stats: dict) -> list[dict]:
             "uci_pts": rider.get("UCI") if rider.get("UCI") else "-1",
             "pcs_pts": rider.get("Pnt") if rider.get("Pnt") else "-1",
             "race_id": race_stats.get("race_id"),
+            "breakaway_km": rider.get("breakaway_km") if rider.get("breakaway_km") else "-1",
         })
 
     return new_results

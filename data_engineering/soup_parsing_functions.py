@@ -211,13 +211,22 @@ def parse_race_result_page(soup) -> list[dict]:
                 key: val for (key, val) in zip(headers, row_data_points, strict=True)
             } | {
                 "racer_url_index": racer_url,
-                "breakaway": breakaway_km,
+                "breakaway_km": breakaway_km,
             }
             results.append(row_data_dict)
 
         return results, []
     except Exception as e:
         return [], [f"Exception while parsing race results: {e}"]
+
+def parse_race_gc_page(soup) -> list[dict]:
+    #Structure is similar as in parse_race_result_page
+    #return ordered list of riders, and the relative time difference to first place
+    #time diff for 1st place should be 0. 
+    #time diff if not found set to None
+    #example html can be found at "data_test/Tour de france 2025 stage 2 results.html"
+
+    pass
 
 def get_race_profile_url(race_url):
     return "/".join(race_url.split("/")[:-1]) + "/route/stage-profiles"
