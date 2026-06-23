@@ -226,7 +226,93 @@ def parse_race_gc_page(soup) -> list[dict]:
     #time diff if not found set to None
     #example html can be found at "data_test/Tour de france 2025 stage 2 results.html"
 
-    pass
+    def parse_time_to_seconds(raw_time: str | None) -> int | None:
+        if raw_time is None:
+            return None
+        cleaned = raw_time.strip()
+        if cleaned == "":
+            return None
+        cleaned = cleaned.replace("+", "").replace("−", "-")
+        sign = -1 if cleaned.startswith("-") else 1
+        cleaned = cleaned.lstrip("-")
+
+        if cleaned in {",,", "-", "s.t."}:
+            return 0
+
+        parts = cleaned.split(":")
+        try:
+            if len(parts) == 3:
+                hours, minutes, seconds = [int(p) for p in parts]
+                total = hours * 3600 + minutes * 60 + seconds
+                return sign * total
+            if len(parts) == 2:
+                minutes, seconds = [int(p) for p in parts]
+                total = minutes * 60 + seconds
+                return sign * total
+            if len(parts) == 1 and parts[0].isdigit():
+                return sign * int(parts[0])
+            return None
+        except Exception:
+            return None
+
+    gc_results = []
+    table = soup.find("table", class_="results")
+    try:
+        headers = [th.get_text(strip=True) for th in table.find("thead").find_all("th")]
+
+        for row in table.find("tbody").find_all("tr"):
+            row_data_points = []
+            racer_url = ""
+
+            for cell in row.find_all("td"):
+                if cell.find("a") and "ridername" in cell.get("class", []):
+                    rider_name = cell.find("a")
+                    row_data_points.append(rider_name.get_text(strip=True))
+                    racer_url = rider_name["href"]
+                elif cell.find("a") and "cu600" in cell.get("class", []):
+                    row_data_points.append(cell.get_text(strip=True))
+                elif "specialty" in cell.get("class", []):
+                    span = cell.find("span")
+                    row_data_points.append(span.get_text(strip=True) if span else "")
+                elif "h2h" in cell.get("class", []):
+                    row_data_points.append("✔️" if cell.find("input", {"type": "checkbox"}) else "")
+                else:
+                    row_data_points.append(cell.get_text(strip=True))
+
+            if len(headers) != len(row_data_points):
+                continue
+
+            row_data_dict = {
+                key: val for (key, val) in zip(headers, row_data_points, strict=True)
+            }
+
+            rider_name = racer_url.split("/")[-1] if racer_url else ""
+            if rider_name == "":
+                continue
+
+            time_diff_seconds = parse_time_to_seconds(row_data_dict.get("Timelag"))
+            if row_data_dict.get("Rnk") == "1" and time_diff_seconds is None:
+                time_diff_seconds = 0
+
+            gc_rank = row_data_dict.get("GC")
+            gc_rank = int(gc_rank) if gc_rank and gc_rank.isdigit() else None
+
+            stage_rank = row_data_dict.get("Rnk")
+            stage_rank = int(stage_rank) if stage_rank and stage_rank.isdigit() else None
+
+            gc_results.append({
+                "rider_name": rider_name,
+                "time_diff": time_diff_seconds,
+                "gc_rank": gc_rank,
+                "stage_rank": stage_rank,
+            })
+
+        if gc_results and gc_results[0].get("time_diff") is None:
+            gc_results[0]["time_diff"] = 0
+
+        return gc_results, []
+    except Exception as e:
+        return [], [f"Exception while parsing race gc results: {e}"]
 
 def get_race_profile_url(race_url):
     return "/".join(race_url.split("/")[:-1]) + "/route/stage-profiles"

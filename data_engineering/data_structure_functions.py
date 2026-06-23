@@ -10,6 +10,7 @@ try:
         get_race_profile_url,
         parse_calendar_page,
         parse_gc_page,
+        parse_race_gc_page,
         parse_race_page,
         parse_race_profile_page,
         parse_race_result_page,
@@ -30,6 +31,7 @@ except ImportError:
         get_race_profile_url,
         parse_calendar_page,
         parse_gc_page,
+        parse_race_gc_page,
         parse_race_page,
         parse_race_profile_page,
         parse_race_result_page,
@@ -154,7 +156,35 @@ def download_gc_pages() -> list[dict]:
     #url finishes on {race_name}/{race_year}/stage-{stage_nr}-gc
     #download_page with url
     #return logs
-    pass
+    races_df = pl.read_parquet("data_v2/races_df.parquet")
+
+    stage_races_df = races_df.filter(
+        pl.col("classification").cast(pl.Utf8).str.starts_with("2.")
+        & pl.col("classification").cast(pl.Utf8).is_in(TOP_TIER_CLASSIFICATIONS)
+        & (pl.col("stage").cast(pl.Float64, strict=False) > 0)
+    )
+
+    unique_stage_races = stage_races_df.select(["name", "year", "stage"]).unique().to_dicts()
+    print(f"Downloading GC pages for {len(unique_stage_races)} stage races")
+
+    log_messages = []
+    for race in unique_stage_races:
+        race_name = race["name"]
+        race_year = race["year"]
+        try:
+            stage_nr = int(float(race["stage"]))
+        except Exception as e:
+            log_messages.append(f"exception for stage conversion ({race_name}, {race_year}, {race['stage']}): {e}")
+            continue
+
+        gc_url = f"{BASE_URL}/race/{race_name}/{race_year}/stage-{stage_nr}-gc"
+        try:
+            _, logs = download_page(gc_url)
+            log_messages.extend(logs)
+        except Exception as e:
+            log_messages.append(f"exception for downloading gc page {gc_url}: {e}")
+
+    return log_messages
 
 def download_rider_pages() -> list[dict]:
     """Downloads rider pages and season statistics pages for the saved list of rider names
@@ -544,7 +574,75 @@ def make_gc_results_df():
     #for each stage race
     #call soup parsing function parse_race_gc_page
     #create polars df with columns race_name, year, stage_nr, rider_name, time_diff
-    pass
+    races_df = pl.read_parquet("data_v2/races_df.parquet").sort("name")
+    stage_races_df = races_df.filter(
+        pl.col("classification").cast(pl.Utf8).str.starts_with("2.")
+        & pl.col("classification").cast(pl.Utf8).is_in(TOP_TIER_CLASSIFICATIONS)
+        & (pl.col("stage").cast(pl.Float64, strict=False) > 0)
+    )
+
+    logs = []
+    all_gc_results = []
+
+    for race in stage_races_df.select(["name", "year", "stage"]).unique().to_dicts():
+        race_name = race["name"]
+        race_year = race["year"]
+        try:
+            stage_nr = int(float(race["stage"]))
+        except Exception as e:
+            logs.append(f"exception for stage conversion ({race_name}, {race_year}, {race['stage']}): {e}")
+            continue
+        if stage_nr == 1:
+            print(f"race_name: {race_name}, race_year: {race_year}")
+
+        gc_url = f"{BASE_URL}/race/{race_name}/{race_year}/stage-{stage_nr}-gc"
+        try:
+            gc_soup = load_soup_from_file(gc_url)
+        except Exception as e:
+            logs.append(f"exception for loading gc file {gc_url}: {e}")
+            continue
+
+        gc_results, parse_logs = parse_race_gc_page(gc_soup)
+        logs.extend(parse_logs)
+
+        for gc_result in gc_results:
+            all_gc_results.append({
+                "race_name": race_name,
+                "year": str(race_year),
+                "stage_nr": stage_nr,
+                "rider_name": gc_result.get("rider_name"),
+                "time_diff": gc_result.get("time_diff"),
+                "gc_rank": gc_result.get("gc_rank"),
+                # "stage_rank": gc_result.get("stage_rank"),
+            })
+
+    output_path = Path("data_v2/gc_results_df.parquet")
+    if output_path.exists():
+        current_gc_df = pl.read_parquet(str(output_path))
+    else:
+        current_gc_df = pl.DataFrame({
+            "race_name": [],
+            "year": [],
+            "stage_nr": [],
+            "rider_name": [],
+            "time_diff": [],
+            "gc_rank": [],
+            # "stage_rank": [],
+        })
+
+    if all_gc_results:
+        new_gc_df = pl.DataFrame(all_gc_results).with_columns([
+            pl.col("stage_nr").cast(pl.Int64, strict=False),
+            pl.col("time_diff").cast(pl.Float64, strict=False),
+            pl.col("gc_rank").cast(pl.Float64, strict=False),
+            # pl.col("stage_rank").cast(pl.Float64, strict=False),
+        ])
+        current_gc_df = pl.concat([current_gc_df, new_gc_df], how="diagonal_relaxed").unique(
+            subset=["race_name", "year", "stage_nr", "rider_name"]
+        )
+
+    current_gc_df.write_parquet(str(output_path))
+    return logs
 
 def get_missing_data_overview():
     results = pl.read_parquet("data_v2/results_df.parquet")
@@ -635,7 +733,7 @@ def main():
     # more_logs = make_races_results_df()
     # logs += more_logs
 
-    download_gc_pages()
+    # download_gc_pages()
     more_logs = make_gc_results_df()
     logs += more_logs
     
